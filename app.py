@@ -4,6 +4,7 @@ import pandas as pd
 import plotly.express as px
 import numpy as np
 from sklearn.decomposition import PCA
+from sklearn.manifold import TSNE
 from sklearn.preprocessing import StandardScaler
 from sklearn.cluster import KMeans
 
@@ -116,11 +117,11 @@ app.layout = html.Div([
             ], style={"padding": "20px"})
         ]),
 
-        dcc.Tab(label="Dimensionality Reduction (PCA)", children=[
+        dcc.Tab(label="Dimensionality Reduction (TSNE)", children=[
             html.Div([
                 html.Label("Release Year Range"),
                 dcc.RangeSlider(
-                    id="pca-year-slider",
+                    id="tsne-year-slider",
                     min=df["release_year"].min(),
                     max=df["release_year"].max(),
                     step=1,
@@ -137,7 +138,7 @@ app.layout = html.Div([
                     clearable=False
                 ),
 
-                dcc.Graph(id="pca-plot", style={"height": "600px"})
+                dcc.Graph(id="tsne-plot", style={"height": "600px"})
             ], style={"padding": "20px"})
         ]),
         
@@ -177,7 +178,7 @@ app.layout = html.Div([
 
 # === Callbacks ===
 
-# Update stored cluster count when user changes it in PCA tab
+# Update stored cluster count when user changes it in TSNE tab
 @app.callback(
     Output("cluster-count-store", "data"),
     Input("cluster-count", "value")
@@ -240,23 +241,23 @@ def update_scatter(year_range, color_by, n_clusters):
 
     return fig, table_data
 
-# PCA tab
+# TSNE tab
 @app.callback(
-    Output("pca-plot", "figure"),
-    [Input("pca-year-slider", "value"),
+    Output("tsne-plot", "figure"),
+    [Input("tsne-year-slider", "value"),
      Input("cluster-count-store", "data")]
 )
-def update_pca(year_range, n_clusters):
+def update_tsne(year_range, n_clusters):
     dff = df[(df["release_year"] >= year_range[0]) & (df["release_year"] <= year_range[1])]
     dff = dff.dropna(subset=numeric_features + ["primary_genre"])
 
     X = dff[numeric_features]
     X_scaled = StandardScaler().fit_transform(X)
 
-    # PCA
-    pca = PCA(n_components=2)
-    components = pca.fit_transform(X_scaled)
-    dff["PC1"], dff["PC2"] = components[:, 0], components[:, 1]
+    # TSNE
+    tsne = TSNE(n_components=2, random_state=42, perplexity=30, max_iter=1000)
+    components = tsne.fit_transform(X_scaled)
+    dff["Dim1"], dff["Dim2"] = components[:, 0], components[:, 1]
 
     # KMeans clustering
     kmeans = KMeans(n_clusters=n_clusters, random_state=42)
@@ -264,11 +265,11 @@ def update_pca(year_range, n_clusters):
 
     fig = px.scatter(
         dff,
-        x="PC1",
-        y="PC2",
+        x="Dim1",
+        y="Dim2",
         color="cluster",
         hover_name="title_y",
-        title=f"PCA Projection of Movies (k={n_clusters})"
+        title=f"TSNE Projection of Movies (k={n_clusters})"
     )
     fig.update_layout(hovermode="closest")
     return fig
@@ -414,5 +415,5 @@ def update_movie_list(click_data, year_range):
     ]
 
 # Run app
-if __name__ == "__main__":
+if __name__ == '__main__':
     app.run(debug=True)
