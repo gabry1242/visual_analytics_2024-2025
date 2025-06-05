@@ -6,6 +6,15 @@ import numpy as np
 from sklearn.decomposition import PCA
 from sklearn.preprocessing import StandardScaler
 from sklearn.cluster import KMeans
+from sklearn.ensemble import RandomForestRegressor, RandomForestClassifier
+from sklearn.model_selection import train_test_split
+from sklearn.pipeline import Pipeline
+from sklearn.compose import ColumnTransformer
+from sklearn.preprocessing import OneHotEncoder
+import joblib
+from sklearn.metrics import mean_squared_error, accuracy_score
+from sklearn.preprocessing import MultiLabelBinarizer
+import plotly.graph_objects as go
 
 # Load and prepare data
 df = pd.read_csv("cleaned_output.csv")
@@ -55,6 +64,53 @@ genre_counts, hierarchy_df = prepare_genre_data(df)
 
 # Define features used for clustering
 numeric_features = ["budget", "revenue", "vote_average", "vote_count", "runtime", "profit", "roi"]
+
+
+
+# ====== Success Prediction Models ======
+# Prepare data for success prediction
+df['genres_list'] = df['genres_y'].str.split('-')
+mlb = MultiLabelBinarizer()
+genre_encoded = pd.DataFrame(mlb.fit_transform(df['genres_list']), 
+                           columns=mlb.classes_, 
+                           index=df.index)
+
+# Calculate success metric
+df['success'] = (df['vote_average'] > 6.5) & (df['revenue'] > df['budget'] * 2)
+df['budget_log'] = np.log1p(df['budget'])
+df['revenue_log'] = np.log1p(df['revenue'])
+df['is_english'] = (df['original_language'] == 'en').astype(int)
+
+# Prepare features and targets
+features = pd.concat([
+    df[['budget_log', 'runtime', 'is_english', 'release_year']],
+    genre_encoded
+], axis=1)
+
+success_target = df['success']
+rating_target = df['vote_average']
+revenue_target = df['revenue_log']
+
+# Split data
+X_train, X_test, y_success_train, y_success_test, y_rating_train, y_rating_test, y_revenue_train, y_revenue_test = train_test_split(
+    features, success_target, rating_target, revenue_target, test_size=0.2, random_state=42
+)
+
+# Build models
+success_model = RandomForestClassifier(n_estimators=100, random_state=42)
+success_model.fit(X_train, y_success_train)
+
+rating_model = RandomForestRegressor(n_estimators=100, random_state=42)
+rating_model.fit(X_train, y_rating_train)
+
+revenue_model = RandomForestRegressor(n_estimators=100, random_state=42)
+revenue_model.fit(X_train, y_revenue_train)
+
+# Get all unique genres from the data
+all_genres = sorted(list(set([genre for sublist in df['genres_list'].dropna() for genre in sublist])))
+
+
+
 
 # Dash app setup
 app = dash.Dash(__name__, suppress_callback_exceptions=True)
@@ -143,37 +199,172 @@ app.layout = html.Div([
         
         dcc.Tab(label="Genre Exploration", children=[
             html.Div([
-                html.Label("Release Year Range"),
-                dcc.RangeSlider(
-                    id="genre-year-slider",
-                    min=df["release_year"].min(),
-                    max=df["release_year"].max(),
-                    step=1,
-                    value=[df["release_year"].min(), df["release_year"].max()],
-                    marks={str(year): str(year) for year in range(df["release_year"].min(), df["release_year"].max() + 1, 5)},
-                    tooltip={"placement": "bottom"}
+                html.Div([  # Controls section
+                    html.Label("Release Year Range"),
+                    dcc.RangeSlider(
+                        id="genre-year-slider",
+                        min=df["release_year"].min(),
+                        max=df["release_year"].max(),
+                        step=1,
+                        value=[df["release_year"].min(), df["release_year"].max()],
+                        marks={str(year): str(year) for year in range(df["release_year"].min(), df["release_year"].max() + 1, 5)},
+                        tooltip={"placement": "bottom"}
+                    ),
+                    
+                    html.Label("Color By"),
+                    dcc.Dropdown(
+                        id="genre-color-by",
+                        options=[
+                            {"label": "Average ROI (%)", "value": "roi"},
+                            {"label": "Average Profit", "value": "profit"},
+                            {"label": "Average Rating", "value": "vote_average"},
+                            {"label": "Number of Movies", "value": "count"}
+                        ],
+                        value="count",
+                        clearable=False
+                    ),
+                ], style={"width": "100%", "marginBottom": "20px"}),
+                
+                # Visualizations section
+        html.Div([
+            # Sunburst graph (fills space)
+            html.Div(
+                dcc.Graph(
+                    id="genre-sunburst",
+                    config={"responsive": True},  # Makes graph fill container
+                    style={
+                        "height": "100%",  # Fills parent div
+                        "width": "100%",   # Fills parent div
+                    }
                 ),
-                
-                html.Label("Color By"),
-                dcc.Dropdown(
-                    id="genre-color-by",
-                    options=[
-                        {"label": "Average ROI (%)", "value": "roi"},
-                        {"label": "Average Profit", "value": "profit"},
-                        {"label": "Average Rating", "value": "vote_average"},
-                        {"label": "Number of Movies", "value": "count"}
-                    ],
-                    value="count",
-                    clearable=False
-                ),
-                
-                dcc.Graph(id="genre-sunburst", style={"height": "700px"}),
-                
-                html.Div(id="genre-movie-list", style={"marginTop": "20px"})
+                style={
+                    "flex": "3",          # Takes 75% of width
+                    "minHeight": "600px",  # Dynamic but constrained
+                    "maxHeight": "700px", # Preoversizing
+                    "padding": "0px",     # Remove padding (can add back if needed)
+                }
+            ),
+            
+            # Movie list (fixed width)
+            html.Div(
+                html.Div(id="genre-movie-list"),
+                style={
+                    "flex": "1",          # Takes 25% of width
+                    "overflowY": "auto",  # Scroll if content overflows
+                    "minHeight": "600px",  # Match sunburst height
+                    "maxHeight": "700px",
+                    "padding": "10px",
+                }
+            )
+        ], style={
+            "display": "flex",
+            "gap": "10px",
+            "width": "100%",
+            "height": "auto",  # Prevents container from expanding
+        })
+
+
             ], style={"padding": "20px"})
+        ]),
+        #Success Predictor tab
+        dcc.Tab(label="Success Predictor", children=[
+            html.Div([
+                html.H2("Movie Success Prediction Tool", style={'textAlign': 'center'}),
+                
+                # Input controls
+                html.Div([
+                    html.Div([
+                        html.Label("Budget (in millions)"),
+                        dcc.Input(id='budget-input', type='number', value=50, min=1, step=1),
+                        
+                        html.Label("Runtime (minutes)"),
+                        dcc.Input(id='runtime-input', type='number', value=120, min=60, max=240, step=5),
+                        
+                        html.Label("Original Language"),
+                        dcc.Dropdown(
+                            id='language-input',
+                            options=[{'label': 'English', 'value': 1},
+                                    {'label': 'Non-English', 'value': 0}],
+                            value=1
+                        ),
+                        
+                        html.Label("Release Year"),
+                        dcc.Input(id='year-input', type='number', value=2023, min=1900, max=2030, step=1),
+                    ], style={'width': '48%', 'display': 'inline-block', 'padding': '10px'}),
+                    
+                    html.Div([
+                        html.Label("Genres"),
+                        dcc.Dropdown(
+                            id='genres-input',
+                            options=[{'label': genre, 'value': genre} for genre in all_genres],
+                            multi=True,
+                            value=['Action']
+                        ),
+                        
+                        html.Br(),
+                        html.Button('Predict Success', id='predict-button', n_clicks=0, 
+                                  style={'background-color': '#4CAF50', 'color': 'white', 'padding': '10px 20px'})
+                    ], style={'width': '48%', 'display': 'inline-block', 'padding': '10px'})
+                ], style={'display': 'flex', 'marginBottom': '20px'}),
+                
+                # Results display
+                html.Div([
+                    html.Div(id='success-output', style={
+                        'fontSize': '20px', 
+                        'padding': '15px', 
+                        'margin': '10px', 
+                        'backgroundColor': '#f8f9fa',
+                        'borderRadius': '5px'
+                    }),
+                    
+                    html.Div(id='rating-output', style={
+                        'fontSize': '20px', 
+                        'padding': '15px', 
+                        'margin': '10px', 
+                        'backgroundColor': '#f8f9fa',
+                        'borderRadius': '5px'
+                    }),
+                    
+                    html.Div(id='revenue-output', style={
+                        'fontSize': '20px', 
+                        'padding': '15px', 
+                        'margin': '10px', 
+                        'backgroundColor': '#f8f9fa',
+                        'borderRadius': '5px'
+                    }),
+                    
+                    html.Div(id='roi-output', style={
+                        'fontSize': '20px', 
+                        'padding': '15px', 
+                        'margin': '10px', 
+                        'backgroundColor': '#f8f9fa',
+                        'borderRadius': '5px'
+                    }),
+                ]),
+                
+                # Recommendations
+                html.Div([
+                    html.H3("Recommendations for Improvement"),
+                    html.Div(id='recommendations', style={
+                        'padding': '15px', 
+                        'margin': '10px', 
+                        'backgroundColor': '#e9ecef',
+                        'borderRadius': '5px'
+                    })
+                ]),
+                
+                # Sensitivity plot
+                dcc.Graph(id='sensitivity-plot', style={'height': '500px', 'marginTop': '20px'})
+            ], style={'padding': '20px'})
         ])
-    ])
+    ])#close all the tabs
 ])
+
+
+
+
+
+
 
 # === Callbacks ===
 
@@ -367,6 +558,8 @@ def update_genre_sunburst(year_range, color_by):
     
     return fig, movie_list
 
+    
+
 # Handle clicks on the sunburst to show movies in the selected genre
 @app.callback(
     Output("movie-list-items", "children"),
@@ -403,7 +596,7 @@ def update_movie_list(click_data, year_range):
         return sub_genres in row['genres_y']
 
     filtered_movies = dff[dff.apply(genre_match, axis=1)]
-    filtered_movies = filtered_movies.sort_values('revenue', ascending=False).head(20)
+    filtered_movies = filtered_movies.sort_values('revenue', ascending=False).head(15)
 
     return [
         html.Li([
@@ -413,6 +606,166 @@ def update_movie_list(click_data, year_range):
         ]) for _, movie in filtered_movies.iterrows()
     ]
 
+# ====== New Callbacks for Success Prediction ======
+@app.callback(
+    [Output('success-output', 'children'),
+     Output('rating-output', 'children'),
+     Output('revenue-output', 'children'),
+     Output('roi-output', 'children'),
+     Output('recommendations', 'children'),
+     Output('sensitivity-plot', 'figure')],
+    [Input('predict-button', 'n_clicks')],
+    [State('budget-input', 'value'),
+     State('runtime-input', 'value'),
+     State('language-input', 'value'),
+     State('year-input', 'value'),
+     State('genres-input', 'value')]
+)
+def update_predictions(n_clicks, budget, runtime, language, year, genres):
+    if n_clicks == 0:
+        return "", "", "", "", "", go.Figure()
+    
+    # Prepare input features
+    input_data = pd.DataFrame({
+        'budget_log': [np.log1p(budget * 1000000)],  # Convert to dollars
+        'runtime': [runtime],
+        'is_english': [language],
+        'release_year': [year]
+    })
+    
+    # Add genre columns
+    for genre in all_genres:
+        input_data[genre] = 1 if genre in genres else 0
+    
+    # Make predictions
+    success_prob = success_model.predict_proba(input_data)[0][1]
+    rating_pred = rating_model.predict(input_data)[0]
+    revenue_pred = np.expm1(revenue_model.predict(input_data)[0])
+    
+    # Calculate ROI
+    roi = revenue_pred / (budget * 1000000)
+    
+    # Generate recommendations
+    recommendations = generate_recommendations(budget, runtime, language, year, genres, 
+                                             success_prob, rating_pred, roi)
+    
+    # Create sensitivity plot
+    fig = create_sensitivity_plot(budget, runtime, language, year, genres)
+    
+    # Format outputs
+    success_output = f"🎬 Success Probability: {success_prob:.1%}"
+    rating_output = f"⭐ Predicted Rating: {rating_pred:.1f}/10"
+    revenue_output = f"💰 Predicted Revenue: ${revenue_pred/1000000:.1f} million"
+    roi_output = f"📈 Predicted ROI: {roi:.1f}x"
+    
+    return success_output, rating_output, revenue_output, roi_output, recommendations, fig
+
+def generate_recommendations(budget, runtime, language, year, genres, 
+                           success_prob, rating_pred, roi):
+    recommendations = []
+    
+    # Check if we can improve rating
+    if rating_pred < 7.0:
+        # Try adding highly rated genres
+        high_rating_genres = ['Drama', 'Biography', 'History', 'Crime']
+        new_genres = list(set(genres + [g for g in high_rating_genres if g not in genres][:1]))
+        if len(new_genres) > len(genres):
+            test_input = prepare_input(budget, runtime, language, year, new_genres)
+            new_rating = rating_model.predict(test_input)[0]
+            if new_rating > rating_pred + 0.3:
+                recommendations.append(
+                    html.Li(f"🎭 Consider adding {new_genres[-1]} genre to increase predicted rating to {new_rating:.1f}")
+                )
+    
+    # Check if we can improve ROI
+    if roi < 3.0:
+        # Try reducing budget
+        new_budget = budget * 0.8
+        test_input = prepare_input(new_budget, runtime, language, year, genres)
+        new_revenue = np.expm1(revenue_model.predict(test_input)[0])
+        new_roi = new_revenue / (new_budget * 1000000)
+        if new_roi > roi * 1.2:
+            recommendations.append(
+                html.Li(f"💵 Reducing budget to ${new_budget:.1f} million could improve ROI to {new_roi:.1f}x")
+            )
+    
+    # Check if we can improve success probability
+    if success_prob < 0.7:
+        # Try adjusting runtime
+        optimal_runtime = 110  # Based on data analysis
+        if abs(runtime - optimal_runtime) > 15:
+            test_input = prepare_input(budget, optimal_runtime, language, year, genres)
+            new_success_prob = success_model.predict_proba(test_input)[0][1]
+            if new_success_prob > success_prob + 0.1:
+                recommendations.append(
+                    html.Li(f"⏱️ Adjusting runtime to {optimal_runtime} minutes could increase success probability to {new_success_prob:.1%}")
+                )
+    
+    if not recommendations:
+        return html.P("✅ Your current parameters are well optimized for success!")
+    
+    return html.Ul(recommendations, style={'listStyleType': 'none', 'paddingLeft': '0'})
+
+def prepare_input(budget, runtime, language, year, genres):
+    input_data = pd.DataFrame({
+        'budget_log': [np.log1p(budget * 1000000)],
+        'runtime': [runtime],
+        'is_english': [language],
+        'release_year': [year]
+    })
+    
+    for genre in all_genres:
+        input_data[genre] = 1 if genre in genres else 0
+    
+    return input_data
+
+def create_sensitivity_plot(budget, runtime, language, year, genres):
+    # Create sensitivity analysis for budget
+    budget_range = np.linspace(budget * 0.5, budget * 2, 10)
+    ratings = []
+    revenues = []
+    success_probs = []
+    
+    for b in budget_range:
+        input_data = prepare_input(b, runtime, language, year, genres)
+        ratings.append(rating_model.predict(input_data)[0])
+        revenues.append(np.expm1(revenue_model.predict(input_data)[0]) / 1000000)
+        success_probs.append(success_model.predict_proba(input_data)[0][1] * 100)
+    
+    fig = go.Figure()
+    
+    fig.add_trace(go.Scatter(
+        x=budget_range, y=ratings,
+        name='Predicted Rating',
+        yaxis='y1',
+        line=dict(color='blue'))
+    )
+    
+    fig.add_trace(go.Scatter(
+        x=budget_range, y=revenues,
+        name='Predicted Revenue (million $)',
+        yaxis='y2',
+        line=dict(color='green'))
+    )
+    
+    fig.add_trace(go.Scatter(
+        x=budget_range, y=success_probs,
+        name='Success Probability (%)',
+        yaxis='y3',
+        line=dict(color='red'))
+    )
+    
+    fig.update_layout(
+        title='Sensitivity to Budget Changes',
+        xaxis_title='Budget (million $)',
+        yaxis=dict(title='Rating (1-10)', color='blue'),
+        yaxis2=dict(title='Revenue (million $)', color='green', overlaying='y', side='right'),
+        yaxis3=dict(title='Success Probability (%)', color='red', overlaying='y', side='left', position=0.15),
+        hovermode='x unified',
+        legend=dict(orientation='h', yanchor='bottom', y=1.02, xanchor='right', x=1)
+    )
+    
+    return fig
 # Run app
 if __name__ == "__main__":
     app.run(debug=True)
