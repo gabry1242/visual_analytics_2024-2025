@@ -953,46 +953,68 @@ def generate_recommendations(budget, runtime, language, year, genres,
                            success_prob, rating_pred, roi):
     recommendations = []
     
-    # Check if we can improve rating
-    if rating_pred < 7.0:
-        # Try adding highly rated genres
-        high_rating_genres = ['Drama', 'Biography', 'History', 'Crime']
-        new_genres = list(set(genres + [g for g in high_rating_genres if g not in genres][:1]))
-        if len(new_genres) > len(genres):
-            test_input = prepare_input(budget, runtime, language, year, new_genres)
-            new_rating = rating_model.predict(test_input)[0]
-            if new_rating > rating_pred + 0.3:
-                recommendations.append(
-                    html.Li(f"🎭 Consider adding {new_genres[-1]} genre to increase predicted rating to {new_rating:.1f}")
-                )
-    
-    # Check if we can improve ROI
-    if roi < 3.0:
-        # Try reducing budget
-        new_budget = budget * 0.8
-        test_input = prepare_input(new_budget, runtime, language, year, genres)
-        new_revenue = np.expm1(revenue_model.predict(test_input)[0])
-        new_roi = new_revenue / (new_budget * 1000000)
-        if new_roi > roi * 1.2:
+    # === 1. Dynamic thresholding based on training data quantiles ===
+    low_success_threshold = success_model.predict_proba(X_train).T[1].mean()
+    low_rating_threshold = y_rating_train.mean()
+    low_roi_threshold = (np.expm1(y_revenue_train) / np.expm1(X_train['budget_log'])).mean()
+
+    # === 2. Genre-based improvement: test adding each genre individually ===
+    if rating_pred < low_rating_threshold:
+        best_improvement = 0
+        best_genre = None
+        for genre in all_genres:
+            if genre not in genres:
+                test_genres = genres + [genre]
+                test_input = prepare_input(budget, runtime, language, year, test_genres)
+                new_rating = rating_model.predict(test_input)[0]
+                improvement = new_rating - rating_pred
+                if improvement > best_improvement:
+                    best_improvement = improvement
+                    best_genre = genre
+
+        if best_genre and best_improvement > 0.3:
             recommendations.append(
-                html.Li(f"💵 Reducing budget to ${new_budget:.1f} million could improve ROI to {new_roi:.1f}x")
+                html.Li(f"🎭 Adding '{best_genre}' genre could increase predicted rating to {rating_pred + best_improvement:.1f}")
             )
-    
-    # Check if we can improve success probability
-    if success_prob < 0.7:
-        # Try adjusting runtime
-        optimal_runtime = 110  # Based on data analysis
-        if abs(runtime - optimal_runtime) > 15:
-            test_input = prepare_input(budget, optimal_runtime, language, year, genres)
-            new_success_prob = success_model.predict_proba(test_input)[0][1]
-            if new_success_prob > success_prob + 0.1:
+
+    # === 3. Budget optimization: try decreasing by steps if ROI is low ===
+    if roi < low_roi_threshold:
+        for factor in [0.9, 0.8, 0.7]:
+            new_budget = budget * factor
+            test_input = prepare_input(new_budget, runtime, language, year, genres)
+            new_revenue = np.expm1(revenue_model.predict(test_input)[0])
+            new_roi = new_revenue / (new_budget * 1_000_000)
+            if new_roi > roi * 1.15:
                 recommendations.append(
-                    html.Li(f"⏱️ Adjusting runtime to {optimal_runtime} minutes could increase success probability to {new_success_prob:.1%}")
+                    html.Li(f"💵 Reducing budget to ${new_budget:.1f}M may improve ROI to {new_roi:.1f}x")
                 )
-    
+                break
+
+    # === 4. Runtime optimization: search for best runtime within range ===
+    # Always explore if runtime adjustment improves success
+    tested_runtimes = list(range(80, 160, 10))
+    best_runtime = runtime
+    best_success = success_prob
+
+    for rt in tested_runtimes:
+        if rt == runtime:
+            continue  # skip current value
+        test_input = prepare_input(budget, rt, language, year, genres)
+        test_success = success_model.predict_proba(test_input)[0][1]
+        if test_success > best_success:
+            best_success = test_success
+            best_runtime = rt
+
+    # Recommend if improvement is meaningful
+    if best_runtime != runtime and best_success > success_prob + 0.05:
+        recommendations.append(
+            html.Li(f"⏱️ Adjusting runtime to {best_runtime} minutes may increase success probability to {best_success:.1%}")
+        )
+
+    # === Default fallback ===
     if not recommendations:
         return html.P("✅ Your current parameters are well optimized for success!")
-    
+
     return html.Ul(recommendations, style={'listStyleType': 'none', 'paddingLeft': '0'})
 
 def prepare_input(budget, runtime, language, year, genres):
