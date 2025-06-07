@@ -15,9 +15,13 @@ import joblib
 from sklearn.metrics import mean_squared_error, accuracy_score
 from sklearn.preprocessing import MultiLabelBinarizer
 import plotly.graph_objects as go
+from itertools import combinations
+import networkx as nx
+import seaborn as sns
+from collections import Counter
 
 # Load and prepare data
-df = pd.read_csv("cleaned_output.csv")
+df = pd.read_csv("merged_with_tags.csv")
 df = df.dropna(subset=["budget", "revenue", "release_year", "title_y", "vote_count", 'genres_y'])
 df = df.drop_duplicates(subset=['title_y'])
 df["release_year"] = df["release_year"].astype(int)
@@ -28,6 +32,14 @@ df["profit_margin"] = (df["profit"] / df["budget"]).replace([np.inf, -np.inf], n
 df["roi"] = df["profit_margin"] * 100
 df["primary_genre"] = df["genres_y"].str.split("-").str[0]
 
+#tags preparation
+all_tags = df['tag'].dropna().str.split(';').explode().str.strip().str.lower()
+# Count the occurrences of each tag
+tag_counts = all_tags.value_counts()
+df['tag_list'] = df['tag'].fillna('').str.lower().str.split(';').apply(lambda tags: [t.strip() for t in tags if t.strip()])
+# Filter tags that appear more than 5 times
+popular_tags = tag_counts[tag_counts > 300]
+# Get co-occurrences of popular tags in the same movie
 # Prepare genre hierarchy data
 def prepare_genre_data(df):
     # Split genres and explode into multiple rows
@@ -66,6 +78,215 @@ genre_counts, hierarchy_df = prepare_genre_data(df)
 numeric_features = ["budget", "revenue", "vote_average", "vote_count", "runtime", "profit", "roi"]
 
 
+##GRAPH CREATION AND DATA PREPARATION###
+
+def build_full_graph(network_data):
+    G = nx.Graph()
+    for node in network_data['nodes']:
+        G.add_node(node['id'], **node)
+    for link in network_data['links']:
+        G.add_edge(link['source'], link['target'], weight=link['value'])
+    return G
+
+# Get subgraph nodes connected to all selected tags (intersection of neighbors)
+def get_expanded_subgraph(G, selected_tags):
+    if not selected_tags:
+        # Return empty graph or full graph if you prefer
+        return nx.Graph()
+    
+    # Use union instead of intersection to expand from all selected tags
+    expanded_nodes = set(selected_tags)
+    for tag in selected_tags:
+        if tag in G:
+            expanded_nodes.update(G.neighbors(tag))
+    
+    return G.subgraph(expanded_nodes).copy()
+
+
+def prune_edges_to_hierarchy(G, pos):
+    import networkx as nx
+    from collections import defaultdict
+
+    layers = defaultdict(list)
+    for node, (x, y) in pos.items():
+        layers[x].append(node)
+
+    sorted_layers = sorted(layers.keys())
+
+    H = nx.Graph()
+    H.add_nodes_from(G.nodes(data=True))
+
+    for i, layer_x in enumerate(sorted_layers):
+        nodes_in_layer = layers[layer_x]
+
+        if i == 0:
+            # First layer, no incoming edges
+            continue
+
+        prev_layer_x = sorted_layers[i - 1]
+        nodes_in_prev_layer = layers[prev_layer_x]
+
+        for node in nodes_in_layer:
+            neighbors_in_prev = [nbr for nbr in G.neighbors(node) if nbr in nodes_in_prev_layer]
+
+            if not neighbors_in_prev:
+                continue
+
+            # Choose edge with highest weight
+            best_nbr = max(
+                neighbors_in_prev,
+                key=lambda nbr: G.edges[node, nbr].get('weight', 1)
+            )
+
+            H.add_edge(node, best_nbr, **G.edges[node, best_nbr])
+
+    return H
+# Create figure from subgraph and highlight selected tags
+def create_network_figure(G, selected_tags):
+    if len(G) == 0:
+        fig = go.Figure()
+        fig.update_layout(
+            title="Select tag(s) to start",
+            xaxis=dict(visible=False),
+            yaxis=dict(visible=False)
+        )
+        return fig
+    def multi_level_hierarchical_layout(G, tag_path, level_distance=300, vertical_gap=80):
+        from collections import deque
+
+        pos = {}
+        level = 0
+        visited = set()
+        for i, current_tag in enumerate(tag_path):
+            if current_tag not in G:
+                continue
+            # Place the current tag
+            pos[current_tag] = (level * level_distance, 0)
+            visited.add(current_tag)
+
+            # Expand to neighbors at next level
+            neighbors = [n for n in G.neighbors(current_tag) if n not in visited]
+            for j, neighbor in enumerate(sorted(neighbors)):
+                y_offset = j * vertical_gap - (len(neighbors) * vertical_gap / 2)
+                pos[neighbor] = ((len(tag_path) + 1) * level_distance, y_offset)
+                visited.add(neighbor)
+
+            level += 1
+
+        return pos
+    
+
+    if selected_tags and all(tag in G for tag in selected_tags):
+        pos = multi_level_hierarchical_layout(G, tag_path=selected_tags)
+    else:
+        pos = nx.spring_layout(G, k=0.5, iterations=50)
+
+    pruned_G = prune_edges_to_hierarchy(G, pos)
+
+    edge_x, edge_y = [], []
+    for edge in pruned_G.edges():
+        x0, y0 = pos[edge[0]]
+        x1, y1 = pos[edge[1]]
+        edge_x.extend([x0, x1, None])
+        edge_y.extend([y0, y1, None])
+
+    edge_trace = go.Scatter(
+        x=edge_x, y=edge_y,
+        line=dict(width=1, color='#888'),
+        hoverinfo='none',
+        mode='lines'
+    )
+
+    node_x, node_y, node_text, node_color, node_size, line_colors = [], [], [], [], [], []
+    for node in pruned_G.nodes():
+        x, y = pos[node]
+        node_x.append(x)
+        node_y.append(y)
+        node_data = pruned_G.nodes[node]
+        node_text.append(
+            f"<b>{node}</b><br>Frequency: {node_data['frequency']}<br>"
+            f"Avg ROI: {node_data['avg_roi']:.2f}<br>"
+            f"Avg Profit: {node_data['avg_profit']:.2f}<br>"
+            f"Avg Rating: {node_data['avg_rating']:.2f}"
+        )
+        node_color.append(node_data['frequency'])
+        node_size.append(10 + 20 * np.log1p(node_data['frequency']))
+        line_colors.append('red' if node in selected_tags else 'DarkSlateGrey')
+
+    node_trace = go.Scatter(
+        x=node_x, y=node_y,
+        mode='markers+text',
+        text=[node for node in pruned_G.nodes()],
+        textposition="top center",
+        hoverinfo='text',
+        hovertext=node_text,
+        marker=dict(
+            showscale=True,
+            colorscale='YlGnBu',
+            color=node_color,
+            size=node_size,
+            colorbar=dict(title="Frequency"),
+            line_width=3,
+            line_color=line_colors
+        )
+    )
+
+    fig = go.Figure(data=[edge_trace, node_trace])
+    fig.update_layout(
+        title='Tag Relationship Network (Tree View)',
+        showlegend=False,
+        hovermode='closest',
+        margin=dict(b=20, l=5, r=5, t=40),
+        xaxis=dict(showgrid=False, zeroline=False, showticklabels=False),
+        yaxis=dict(showgrid=False, zeroline=False, showticklabels=False),
+        height=700,
+        transition={'duration': 500}
+    )
+
+    return fig
+
+
+def preprocess_tag_network(df):
+    # Flatten all tags & count frequency
+    df['tag_list'] = df['tag'].fillna('').str.lower().str.split(';').apply(lambda tags: [t.strip() for t in tags if t.strip()])
+
+    all_tags = df['tag_list'].explode()
+    tag_counts = all_tags.value_counts()
+
+    # Keep only popular tags
+    popular_tags = tag_counts[tag_counts >= 300].index.tolist()
+
+    # Filter df rows to only include tags in popular_tags
+    df['filtered_tags'] = df['tag_list'].apply(lambda tags: [t for t in tags if t in popular_tags])
+
+    # Build co-occurrence counts efficiently
+    from collections import Counter
+    cooc_counter = Counter()
+
+    for tags in df['filtered_tags']:
+        unique_tags = list(set(tags))
+        for i in range(len(unique_tags)):
+            for j in range(i + 1, len(unique_tags)):
+                pair = tuple(sorted([unique_tags[i], unique_tags[j]]))
+                cooc_counter[pair] += 1
+
+    # Build nodes with aggregated metrics
+    nodes = []
+    for tag in popular_tags:
+        tag_movies = df[df['filtered_tags'].apply(lambda tags: tag in tags)]
+        nodes.append({
+            'id': tag,
+            'label': tag,
+            'frequency': tag_counts[tag],
+            'avg_roi': tag_movies['roi'].mean() if not tag_movies.empty else 0,
+            'avg_profit': tag_movies['profit'].mean() if not tag_movies.empty else 0,
+            'avg_rating': tag_movies['vote_average'].mean() if not tag_movies.empty else 0,
+        })
+
+    # Build links
+    links = [{'source': src, 'target': tgt, 'value': count} for (src, tgt), count in cooc_counter.items()]
+
+    return {'nodes': nodes, 'links': links}
 
 # ====== Success Prediction Models ======
 # Prepare data for success prediction
@@ -115,12 +336,12 @@ all_genres = sorted(list(set([genre for sublist in df['genres_list'].dropna() fo
 # Dash app setup
 app = dash.Dash(__name__, suppress_callback_exceptions=True)
 app.title = "Movie Analytics Dashboard"
+network_data = preprocess_tag_network(df)
 
 app.layout = html.Div([
     html.H1("Movie Financial Analytics", style={"textAlign": "center"}),
-
     dcc.Store(id="cluster-count-store", data=3),  # default number of clusters
-
+    dcc.Store(id='network-data-store', data=network_data),
     dcc.Tabs([
         dcc.Tab(label="Budget vs Revenue", children=[
             html.Div([
@@ -356,10 +577,46 @@ app.layout = html.Div([
                 # Sensitivity plot
                 dcc.Graph(id='sensitivity-plot', style={'height': '500px', 'marginTop': '20px'})
             ], style={'padding': '20px'})
+        ]),
+        dcc.Tab(label="Tag Network Analysis", children=[
+            html.Div([
+                html.H2("Movie Tag Network Visualization"),
+
+                html.Label("Select Tags:"),
+                dcc.Dropdown(
+                    id='selected-tags-dropdown',
+                    options=[],  # start empty, filled by callback
+                    multi=True,
+                    style={"width": "100%"}
+                ),
+
+                html.Br(),
+
+                html.Label("Co-occurrence Threshold:"),
+                dcc.Slider(id='cooc-threshold', min=1, max=20, step=1, value=5),
+
+                html.Br(),
+
+                html.Label("Node Color Metric:"),
+                dcc.Dropdown(
+                    id='node-color-metric',
+                    options=[
+                        {"label": "Frequency", "value": "frequency"},
+                        {"label": "Average ROI", "value": "avg_roi"},
+                        {"label": "Average Profit", "value": "avg_profit"},
+                        {"label": "Average Rating", "value": "avg_rating"},
+                    ],
+                    value="frequency",
+                    clearable=False,
+                ),
+
+                dcc.Graph(id='tag-network-graph', style={'height': '700px'}),
+
+                html.Div(id='genre-distribution', style={"marginTop": "20px"})
+            ])
         ])
     ])#close all the tabs
 ])
-
 
 
 
@@ -766,6 +1023,85 @@ def create_sensitivity_plot(budget, runtime, language, year, genres):
     )
     
     return fig
+
+
+###CALLBACK FOR GRAPH OF TAGS###
+@app.callback(
+    Output('selected-tags-dropdown', 'options'),
+    Input('network-data-store', 'data')
+)
+def update_dropdown_options(network_data):
+    nodes = network_data.get('nodes', [])
+    options = [{'label': node['label'], 'value': node['id']} for node in nodes]
+    return options
+
+@app.callback(
+    Output('tag-network-graph', 'figure'),
+    Input('selected-tags-dropdown', 'value'),
+    State('network-data-store', 'data')
+)
+def update_graph(selected_tags, network_data):
+    if not selected_tags:
+        # Return empty figure with message
+        fig = go.Figure()
+        fig.update_layout(
+            title="Select tag(s) to start",
+            xaxis=dict(visible=False),
+            yaxis=dict(visible=False)
+        )
+        return fig
+    
+    # Filter dataframe to movies containing all selected tags
+    selected_tags_set = set(selected_tags)
+    
+    # df['filtered_tags'] is a list of tags per movie (preprocessed)
+    filtered_df = df[df['filtered_tags'].apply(lambda tags: selected_tags_set.issubset(set(tags)))]
+
+    if filtered_df.empty:
+        # No movies with all selected tags, return empty graph
+        fig = go.Figure()
+        fig.update_layout(title="No movies found with all selected tags.")
+        return fig
+
+    # Get all tags in filtered movies (flatten)
+    all_tags_in_filtered = filtered_df['filtered_tags'].explode().value_counts()
+
+    # Build nodes only for these tags
+    nodes = []
+    for tag, freq in all_tags_in_filtered.items():
+        tag_movies = filtered_df[filtered_df['filtered_tags'].apply(lambda tags: tag in tags)]
+        nodes.append({
+            'id': tag,
+            'label': tag,
+            'frequency': freq,
+            'avg_roi': tag_movies['roi'].mean(),
+            'avg_profit': tag_movies['profit'].mean(),
+            'avg_rating': tag_movies['vote_average'].mean()
+        })
+
+    # Build co-occurrence in filtered_df (same as before but only for filtered movies)
+    from collections import Counter
+    cooc_counter = Counter()
+    for tags in filtered_df['filtered_tags']:
+        unique_tags = list(set(tags))
+        for i in range(len(unique_tags)):
+            for j in range(i + 1, len(unique_tags)):
+                pair = tuple(sorted([unique_tags[i], unique_tags[j]]))
+                cooc_counter[pair] += 1
+
+    links = [{'source': src, 'target': tgt, 'value': count} for (src, tgt), count in cooc_counter.items()]
+
+    # Build graph
+    G = nx.Graph()
+    for node in nodes:
+        G.add_node(node['id'], **node)
+    for link in links:
+        G.add_edge(link['source'], link['target'], weight=link['value'])
+
+
+    fig = create_network_figure(G, selected_tags)
+    return fig
+
 # Run app
 if __name__ == "__main__":
     app.run(debug=True)
