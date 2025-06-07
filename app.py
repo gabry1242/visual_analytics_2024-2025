@@ -142,7 +142,7 @@ def prune_edges_to_hierarchy(G, pos):
 
     return H
 # Create figure from subgraph and highlight selected tags
-def create_network_figure(G, selected_tags):
+def create_network_figure(G, selected_tags, color_metric):
     if len(G) == 0:
         fig = go.Figure()
         fig.update_layout(
@@ -151,27 +151,56 @@ def create_network_figure(G, selected_tags):
             yaxis=dict(visible=False)
         )
         return fig
-    def multi_level_hierarchical_layout(G, tag_path, level_distance=300, vertical_gap=80):
+    def multi_level_hierarchical_layout(G, tag_path, level_distance=300, vertical_gap=50):
         from collections import deque
 
         pos = {}
         level = 0
         visited = set()
+        canvas_height = 700
+        # for i, current_tag in enumerate(tag_path):
+        #     if current_tag not in G:
+        #         continue
+        #     # Place the current tag
+        #     pos[current_tag] = (level * level_distance, 0)
+        #     visited.add(current_tag)
+            
+        #     # Expand to neighbors at next level
+        #     neighbors = [n for n in G.neighbors(current_tag) if n not in visited]
+        #     for j, neighbor in enumerate(sorted(neighbors)):
+        #         y_offset = j * vertical_gap - (len(neighbors) * vertical_gap / 2)
+        #         print(j, neighbor)
+        #         #y_offset = ((j + 0.5) / num_neighbors) * canvas_height - (canvas_height / 2)
+        #         pos[neighbor] = ((len(tag_path) + 1) * level_distance, y_offset)
+        #         visited.add(neighbor)
+
+        #     level += 1
         for i, current_tag in enumerate(tag_path):
             if current_tag not in G:
                 continue
-            # Place the current tag
-            pos[current_tag] = (level * level_distance, 0)
+            pos[current_tag] = (i * level_distance, 0)
             visited.add(current_tag)
 
-            # Expand to neighbors at next level
-            neighbors = [n for n in G.neighbors(current_tag) if n not in visited]
-            for j, neighbor in enumerate(sorted(neighbors)):
-                y_offset = j * vertical_gap - (len(neighbors) * vertical_gap / 2)
-                pos[neighbor] = ((len(tag_path) + 1) * level_distance, y_offset)
-                visited.add(neighbor)
+        # Collect unique neighbors that are not in selected tags
+        all_neighbors = set()
+        for tag in tag_path:
+            if tag not in G:
+                continue
+            neighbors = set(G.neighbors(tag))
+            all_neighbors.update(neighbors)
 
-            level += 1
+        # Remove already visited nodes (e.g., selected tags)
+        last_layer_nodes = sorted(all_neighbors - visited)
+        num_neighbors = len(last_layer_nodes)
+
+        # Distribute them vertically in canvas_height
+        canvas_height = 700
+        vertical_step = canvas_height / (num_neighbors + 1)
+
+        for j, neighbor in enumerate(last_layer_nodes):
+            y_offset = (j + 1) * vertical_step - (canvas_height / 2)
+            pos[neighbor] = ((len(tag_path)) * level_distance, y_offset)
+            visited.add(neighbor)
 
         return pos
     
@@ -209,8 +238,9 @@ def create_network_figure(G, selected_tags):
             f"Avg Profit: {node_data['avg_profit']:.2f}<br>"
             f"Avg Rating: {node_data['avg_rating']:.2f}"
         )
-        node_color.append(node_data['frequency'])
-        node_size.append(10 + 20 * np.log1p(node_data['frequency']))
+        color_value = node_data.get(color_metric, 0)
+        node_color.append(color_value)
+        node_size.append(20)
         line_colors.append('red' if node in selected_tags else 'DarkSlateGrey')
 
     node_trace = go.Scatter(
@@ -225,7 +255,7 @@ def create_network_figure(G, selected_tags):
             colorscale='YlGnBu',
             color=node_color,
             size=node_size,
-            colorbar=dict(title="Frequency"),
+            colorbar=dict(title=color_metric.replace('_', ' ').title()),
             line_width=3,
             line_color=line_colors
         )
@@ -491,92 +521,99 @@ app.layout = html.Div([
         dcc.Tab(label="Success Predictor", children=[
             html.Div([
                 html.H2("Movie Success Prediction Tool", style={'textAlign': 'center'}),
-                
-                # Input controls
+
+                # Main container - 2 columns: left for input/results, right for graph
                 html.Div([
+                    # Left Column
                     html.Div([
-                        html.Label("Budget (in millions)"),
-                        dcc.Input(id='budget-input', type='number', value=50, min=1, step=1),
+                        # Inputs (Top Left)
+                        html.Div([
+                            html.Div([
+                                # Row 1: Budget + Runtime
+                                html.Div([
+                                    html.Div([
+                                        html.Label("Budget (in millions)"),
+                                        dcc.Input(id='budget-input', type='number', value=50, min=1, step=1, style={'width': '100%'})
+                                    ], style={'width': '48%', 'display': 'inline-block', 'marginRight': '4%'}),
+
+                                    html.Div([
+                                        html.Label("Runtime (minutes)"),
+                                        dcc.Input(id='runtime-input', type='number', value=120, min=60, max=240, step=5, style={'width': '100%'})
+                                    ], style={'width': '48%', 'display': 'inline-block'})
+                                ], style={'marginBottom': '10px'}),
+
+                                # Row 2: Language + Year
+                                html.Div([
+                                    html.Div([
+                                        html.Label("Original Language"),
+                                        dcc.Dropdown(
+                                            id='language-input',
+                                            options=[{'label': 'English', 'value': 1},
+                                                    {'label': 'Non-English', 'value': 0}],
+                                            value=1,
+                                            style={'width': '100%'}
+                                        )
+                                    ], style={'width': '48%', 'display': 'inline-block', 'marginRight': '4%'}),
+
+                                    html.Div([
+                                        html.Label("Release Year"),
+                                        dcc.Input(id='year-input', type='number', value=2023, min=1900, max=2030, step=1, style={'width': '100%'})
+                                    ], style={'width': '48%', 'display': 'inline-block'})
+                                ], style={'marginBottom': '10px'}),
+
+                                # Row 3: Genres full width
+                                html.Div([
+                                    html.Label("Genres"),
+                                    dcc.Dropdown(
+                                        id='genres-input',
+                                        options=[{'label': genre, 'value': genre} for genre in all_genres],
+                                        multi=True,
+                                        value=['Action'],
+                                        style={'width': '100%'}
+                                    )
+                                ], style={'marginBottom': '15px'}),
+
+                                # Predict button
+                                html.Button('Predict Success', id='predict-button', n_clicks=0,
+                                            style={'background-color': '#4CAF50', 'color': 'white', 'width': '100%', 'padding': '10px'})
+                            ])
+                        ], style={'marginBottom': '20px'}),
+
                         
-                        html.Label("Runtime (minutes)"),
-                        dcc.Input(id='runtime-input', type='number', value=120, min=60, max=240, step=5),
-                        
-                        html.Label("Original Language"),
-                        dcc.Dropdown(
-                            id='language-input',
-                            options=[{'label': 'English', 'value': 1},
-                                    {'label': 'Non-English', 'value': 0}],
-                            value=1
-                        ),
-                        
-                        html.Label("Release Year"),
-                        dcc.Input(id='year-input', type='number', value=2023, min=1900, max=2030, step=1),
-                    ], style={'width': '48%', 'display': 'inline-block', 'padding': '10px'}),
-                    
+                        # Results + Recommendations (Bottom Left)
+                        html.Div([
+                            html.Div(id='success-output', style={
+                                'fontSize': '16px', 'padding': '10px', 'marginBottom': '8px',
+                                'backgroundColor': '#f8f9fa', 'borderRadius': '5px'
+                            }),
+                            html.Div(id='rating-output', style={
+                                'fontSize': '16px', 'padding': '10px', 'marginBottom': '8px',
+                                'backgroundColor': '#f8f9fa', 'borderRadius': '5px'
+                            }),
+                            html.Div(id='revenue-output', style={
+                                'fontSize': '16px', 'padding': '10px', 'marginBottom': '8px',
+                                'backgroundColor': '#f8f9fa', 'borderRadius': '5px'
+                            }),
+                            html.Div(id='roi-output', style={
+                                'fontSize': '16px', 'padding': '10px', 'marginBottom': '8px',
+                                'backgroundColor': '#f8f9fa', 'borderRadius': '5px'
+                            }),
+                            html.H3("Recommendations for Improvement", style={'marginTop': '20px'}),
+                            html.Div(id='recommendations', style={
+                                'padding': '10px',
+                                'backgroundColor': '#e9ecef',
+                                'borderRadius': '5px'
+                            })
+                        ])
+                    ], style={'width': '40%', 'padding': '10px', 'display': 'inline-block', 'verticalAlign': 'top'}),
+
+                    # Right Column: Sensitivity Plot
                     html.Div([
-                        html.Label("Genres"),
-                        dcc.Dropdown(
-                            id='genres-input',
-                            options=[{'label': genre, 'value': genre} for genre in all_genres],
-                            multi=True,
-                            value=['Action']
-                        ),
-                        
-                        html.Br(),
-                        html.Button('Predict Success', id='predict-button', n_clicks=0, 
-                                  style={'background-color': '#4CAF50', 'color': 'white', 'padding': '10px 20px'})
-                    ], style={'width': '48%', 'display': 'inline-block', 'padding': '10px'})
-                ], style={'display': 'flex', 'marginBottom': '20px'}),
-                
-                # Results display
-                html.Div([
-                    html.Div(id='success-output', style={
-                        'fontSize': '20px', 
-                        'padding': '15px', 
-                        'margin': '10px', 
-                        'backgroundColor': '#f8f9fa',
-                        'borderRadius': '5px'
-                    }),
-                    
-                    html.Div(id='rating-output', style={
-                        'fontSize': '20px', 
-                        'padding': '15px', 
-                        'margin': '10px', 
-                        'backgroundColor': '#f8f9fa',
-                        'borderRadius': '5px'
-                    }),
-                    
-                    html.Div(id='revenue-output', style={
-                        'fontSize': '20px', 
-                        'padding': '15px', 
-                        'margin': '10px', 
-                        'backgroundColor': '#f8f9fa',
-                        'borderRadius': '5px'
-                    }),
-                    
-                    html.Div(id='roi-output', style={
-                        'fontSize': '20px', 
-                        'padding': '15px', 
-                        'margin': '10px', 
-                        'backgroundColor': '#f8f9fa',
-                        'borderRadius': '5px'
-                    }),
-                ]),
-                
-                # Recommendations
-                html.Div([
-                    html.H3("Recommendations for Improvement"),
-                    html.Div(id='recommendations', style={
-                        'padding': '15px', 
-                        'margin': '10px', 
-                        'backgroundColor': '#e9ecef',
-                        'borderRadius': '5px'
-                    })
-                ]),
-                
-                # Sensitivity plot
-                dcc.Graph(id='sensitivity-plot', style={'height': '500px', 'marginTop': '20px'})
-            ], style={'padding': '20px'})
+                        dcc.Graph(id='sensitivity-plot', style={'height': '100%', 'width': '100%'})
+                    ], style={'width': '58%', 'display': 'inline-block', 'padding': '10px', 'verticalAlign': 'top'})
+                ], style={'display': 'flex', 'justifyContent': 'space-between'}),
+
+            ], style={'padding': '20px', 'height': '100vh', 'boxSizing': 'border-box', 'overflow': 'hidden'})
         ]),
         dcc.Tab(label="Tag Network Analysis", children=[
             html.Div([
@@ -589,11 +626,6 @@ app.layout = html.Div([
                     multi=True,
                     style={"width": "100%"}
                 ),
-
-                html.Br(),
-
-                html.Label("Co-occurrence Threshold:"),
-                dcc.Slider(id='cooc-threshold', min=1, max=20, step=1, value=5),
 
                 html.Br(),
 
@@ -1038,9 +1070,10 @@ def update_dropdown_options(network_data):
 @app.callback(
     Output('tag-network-graph', 'figure'),
     Input('selected-tags-dropdown', 'value'),
+    Input('node-color-metric', 'value'),  
     State('network-data-store', 'data')
 )
-def update_graph(selected_tags, network_data):
+def update_graph(selected_tags, color_metric, network_data):
     if not selected_tags:
         # Return empty figure with message
         fig = go.Figure()
@@ -1099,7 +1132,7 @@ def update_graph(selected_tags, network_data):
         G.add_edge(link['source'], link['target'], weight=link['value'])
 
 
-    fig = create_network_figure(G, selected_tags)
+    fig = create_network_figure(G, selected_tags, color_metric)
     return fig
 
 # Run app
