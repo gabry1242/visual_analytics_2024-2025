@@ -19,6 +19,7 @@ from itertools import combinations
 import networkx as nx
 import seaborn as sns
 from collections import Counter
+from sklearn.preprocessing import MinMaxScaler
 
 # Load and prepare data
 df = pd.read_csv("merged_with_tags.csv")
@@ -386,40 +387,79 @@ app.layout = html.Div([
                     tooltip={"placement": "bottom"}
                 ),
 
-                html.Label("Color By"),
-                dcc.Dropdown(
-                    id="color-by",
-                    options=[
-                        {"label": "ROI (%)", "value": "roi"},
-                        {"label": "Profit Margin", "value": "profit_margin"},
-                        {"label": "Vote Average", "value": "vote_average"},
-                        {"label": "Primary Genre", "value": "primary_genre"},
-                        {"label": "Runtime", "value": "runtime"},
-                        {"label": "Cluster Label", "value": "cluster_label"}
-                    ],
-                    value="roi",
-                    clearable=False
-                ),
+                # html.Label("Color By"),
+                # dcc.Dropdown(
+                #     id="color-by",
+                #     options=[
+                #         {"label": "ROI (%)", "value": "roi"},
+                #         {"label": "Profit Margin", "value": "profit_margin"},
+                #         {"label": "Vote Average", "value": "vote_average"},
+                #         {"label": "Primary Genre", "value": "primary_genre"},
+                #         {"label": "Runtime", "value": "runtime"},
+                #         {"label": "Cluster Label", "value": "cluster_label"}
+                #     ],
+                #     value="roi",
+                #     clearable=False
+                # ),
 
-                dcc.Graph(id="scatter-plot", style={"height": "600px"}),
+                html.Div([
+                    html.Div([
+                        html.Label("Color By"),
+                        dcc.Dropdown(
+                            id="color-by",
+                            options=[
+                                {"label": "ROI (%)", "value": "roi"},
+                                {"label": "Profit Margin", "value": "profit_margin"},
+                                {"label": "Vote Average", "value": "vote_average"},
+                                {"label": "Primary Genre", "value": "primary_genre"},
+                                {"label": "Runtime", "value": "runtime"},
+                                {"label": "Cluster Label", "value": "cluster_label"}
+                            ],
+                            value="roi",
+                            clearable=False
+                        ),                        
+                        dcc.Graph(id="scatter-plot", style={"height": "700px", "width": "100%"})
+                    ], style={"flex": "3", "padding": "10px"}),
 
-                html.H3("Movie Table"),
-                dash_table.DataTable(
-                    id="movie-table",
-                    columns=[
-                        {"name": "Title", "id": "title_y"},
-                        {"name": "Year", "id": "release_year"},
-                        {"name": "Budget ($)", "id": "budget"},
-                        {"name": "Revenue ($)", "id": "revenue"},
-                        {"name": "Profit ($)", "id": "profit"},
-                        {"name": "ROI %", "id": "roi"},
-                        {"name": "Rating", "id": "vote_average"}
-                    ],
-                    page_size=10,
-                    style_table={"overflowX": "auto"},
-                    style_cell={"textAlign": "left", "padding": "8px"},
-                    style_header={"fontWeight": "bold"}
-                )
+                    html.Div([
+                        # html.H3("Movie Table"),
+                            html.Label("Sort By"),
+                            dcc.Dropdown(
+                                id="movie-sort-by",
+                                options=[
+                                    {"label": "Revenue", "value": "revenue"},
+                                    {"label": "ROI", "value": "roi"},
+                                    {"label": "Rating", "value": "vote_average"}
+                                ],
+                                value="revenue",
+                                clearable=False
+                            ),
+                            html.H3("Movie Table"),
+                            html.Ul(id="movie-table", style={
+                            "listStyleType": "none",
+                            "padding": 0,
+                            "maxHeight": "700px",
+                            "overflowY": "auto"
+                        })
+                    # ], style={"flex": "1", "padding": "10px"})
+                    #     dash_table.DataTable(
+                    #         id="movie-table",
+                    #         columns=[
+                    #             {"name": "Title", "id": "title_y"},
+                    #             {"name": "Year", "id": "release_year"},
+                    #             {"name": "Budget ($)", "id": "budget"},
+                    #             {"name": "Revenue ($)", "id": "revenue"},
+                    #             {"name": "Profit ($)", "id": "profit"},
+                    #             {"name": "ROI %", "id": "roi"},
+                    #             {"name": "Rating", "id": "vote_average"}
+                    #         ],
+                    #         page_size=10,
+                    #         style_table={"overflowX": "auto"},
+                    #         style_cell={"textAlign": "left", "padding": "8px"},
+                    #         style_header={"fontWeight": "bold"}
+                    #     )
+                    ], style={"flex": "1", "padding": "10px", "overflowY": "auto", "maxHeight": "700px"})
+                ], style={"display": "flex", "flexDirection": "row"})
             ], style={"padding": "20px"})
         ]),
 
@@ -668,12 +708,13 @@ def update_cluster_store(n_clusters):
 # Budget vs Revenue tab
 @app.callback(
     [Output("scatter-plot", "figure"),
-     Output("movie-table", "data")],
+     Output("movie-table", "children")],
     [Input("year-slider", "value"),
      Input("color-by", "value"),
-     Input("cluster-count-store", "data")]
+     Input("cluster-count-store", "data"),
+     Input("movie-sort-by", "value")]
 )
-def update_scatter(year_range, color_by, n_clusters):
+def update_scatter(year_range, color_by, n_clusters, sort_by):
     dff = df[(df["release_year"] >= year_range[0]) & (df["release_year"] <= year_range[1])]
     dff = dff.dropna(subset=["budget", "revenue", "vote_count", color_by] if color_by != "cluster_label" else numeric_features)
 
@@ -687,11 +728,14 @@ def update_scatter(year_range, color_by, n_clusters):
         if "cluster_label" in dff.columns:
             dff = dff.drop(columns=["cluster_label"])
 
+    scaler = MinMaxScaler(feature_range=(2, 80))
+    dff["scaled_size"] = scaler.fit_transform(dff[["vote_count"]])
     fig = px.scatter(
         dff,
         x="budget",
         y="revenue",
         color=color_by,
+        #size="scaled_size",
         size="vote_count",
         hover_name="title_y",
         hover_data=["release_year", "budget", "revenue", "profit", "roi", "vote_average"],
@@ -714,11 +758,18 @@ def update_scatter(year_range, color_by, n_clusters):
         hovermode="closest"
     )
 
-    table_data = dff.sort_values("revenue", ascending=False).head(500)[[
-        "title_y", "release_year", "budget", "revenue", "profit", "roi", "vote_average"
-    ]].to_dict("records")
-
-    return fig, table_data
+    # table_data = dff.sort_values("revenue", ascending=False).head(500)[[
+    #     "title_y", "release_year", "budget", "revenue", "profit", "roi", "vote_average"
+    # ]].to_dict("records")
+    top_movies = dff.sort_values(sort_by, ascending=False).head(15)
+    movie_list = [
+        html.Li([
+            html.Strong(movie["title_y"]),
+            html.Br(),
+            f"Year: {movie['release_year']} | Revenue: ${movie['revenue']:,.0f} | ROI: {movie['roi']:.1f}% | Rating: {movie['vote_average']:.1f}"
+        ]) for _, movie in top_movies.iterrows()
+    ]
+    return fig, movie_list
 
 # PCA tab
 @app.callback(
