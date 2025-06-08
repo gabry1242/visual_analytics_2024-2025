@@ -705,51 +705,53 @@ app.layout = html.Div([
 def update_cluster_store(n_clusters):
     return n_clusters
 
-# Budget vs Revenue tab
+
 @app.callback(
-    [Output("scatter-plot", "figure"),
-     Output("movie-table", "children")],
+    Output("scatter-plot", "figure"),
     [Input("year-slider", "value"),
      Input("color-by", "value"),
-     Input("cluster-count-store", "data"),
-     Input("movie-sort-by", "value")]
+     Input("cluster-count-store", "data")]
 )
-def update_scatter(year_range, color_by, n_clusters, sort_by):
+def update_scatter_figure(year_range, color_by, n_clusters):
     dff = df[(df["release_year"] >= year_range[0]) & (df["release_year"] <= year_range[1])]
     dff = dff.dropna(subset=["budget", "revenue", "vote_count", color_by] if color_by != "cluster_label" else numeric_features)
 
-    # Apply clustering only if needed
     if color_by == "cluster_label":
         X = dff[numeric_features]
         X_scaled = StandardScaler().fit_transform(X)
         kmeans = KMeans(n_clusters=n_clusters, random_state=42)
         dff["cluster_label"] = kmeans.fit_predict(X_scaled).astype(str)
+        color_by_plot = "cluster_label"
     else:
-        if "cluster_label" in dff.columns:
-            dff = dff.drop(columns=["cluster_label"])
+        dff = dff.drop(columns=["cluster_label"], errors="ignore")
+        if color_by in ["roi", "vote_average"]:
+            lower = dff[color_by].quantile(0.05)
+            upper = dff[color_by].quantile(0.95)
+            dff["color_clip"] = dff[color_by].clip(lower, upper)
+            color_by_plot = "color_clip"
+        elif color_by in ["runtime"]:
+            lower = dff[color_by].quantile(0.01)
+            upper = dff[color_by].quantile(0.99)
+            dff["color_clip"] = dff[color_by].clip(lower, upper)
+            color_by_plot = "color_clip"
+        else:
+            color_by_plot = color_by
 
     scaler = MinMaxScaler(feature_range=(2, 80))
     dff["scaled_size"] = scaler.fit_transform(dff[["vote_count"]])
+
     fig = px.scatter(
         dff,
         x="budget",
         y="revenue",
-        color=color_by,
-        #size="scaled_size",
+        color=color_by_plot,
         size="vote_count",
         hover_name="title_y",
         hover_data=["release_year", "budget", "revenue", "profit", "roi", "vote_average"],
-        labels={
-            "budget": "Budget ($)",
-            "revenue": "Revenue ($)",
-            "roi": "ROI %",
-            "vote_average": "Rating",
-            "primary_genre": "Genre",
-            "cluster_label": "Cluster"
-        },
-        title=f"Budget vs Revenue ({year_range[0]}–{year_range[1]})",
+        labels={"color_clip": color_by},
         log_x=True,
-        log_y=True
+        log_y=True,
+        title=f"Budget vs Revenue ({year_range[0]}–{year_range[1]})"
     )
 
     fig.update_layout(
@@ -757,10 +759,32 @@ def update_scatter(year_range, color_by, n_clusters, sort_by):
         yaxis_title="Revenue (log)",
         hovermode="closest"
     )
+    return fig
 
-    # table_data = dff.sort_values("revenue", ascending=False).head(500)[[
-    #     "title_y", "release_year", "budget", "revenue", "profit", "roi", "vote_average"
-    # ]].to_dict("records")
+@app.callback(
+    Output("movie-table", "children"),
+    [Input("scatter-plot", "relayoutData"),
+     Input("year-slider", "value"),
+     Input("movie-sort-by", "value")]
+)
+def update_movie_table(relayout_data, year_range, sort_by):
+    dff = df[(df["release_year"] >= year_range[0]) & (df["release_year"] <= year_range[1])]
+
+    if relayout_data and all(k in relayout_data for k in ["xaxis.range[0]", "xaxis.range[1]", "yaxis.range[0]", "yaxis.range[1]"]):
+        x0 = relayout_data["xaxis.range[0]"]
+        x1 = relayout_data["xaxis.range[1]"]
+        y0 = relayout_data["yaxis.range[0]"]
+        y1 = relayout_data["yaxis.range[1]"]
+        budget_min = 10 ** x0
+        budget_max = 10 ** x1
+        revenue_min = 10 ** y0
+        revenue_max = 10 ** y1
+
+        dff = dff[
+            (dff["budget"] >= budget_min) & (dff["budget"] <= budget_max) &
+            (dff["revenue"] >= revenue_min) & (dff["revenue"] <= revenue_max)
+        ]
+
     top_movies = dff.sort_values(sort_by, ascending=False).head(15)
     movie_list = [
         html.Li([
@@ -769,7 +793,101 @@ def update_scatter(year_range, color_by, n_clusters, sort_by):
             f"Year: {movie['release_year']} | Revenue: ${movie['revenue']:,.0f} | ROI: {movie['roi']:.1f}% | Rating: {movie['vote_average']:.1f}"
         ]) for _, movie in top_movies.iterrows()
     ]
-    return fig, movie_list
+    return movie_list
+# Budget vs Revenue tab
+# def update_scatter(year_range, color_by, n_clusters, sort_by, relayout_data):
+#     dff = df[(df["release_year"] >= year_range[0]) & (df["release_year"] <= year_range[1])]
+#     dff = dff.dropna(subset=["budget", "revenue", "vote_count", color_by] if color_by != "cluster_label" else numeric_features)
+
+#     # Apply clustering only if needed
+#     if color_by == "cluster_label":
+#         X = dff[numeric_features]
+#         X_scaled = StandardScaler().fit_transform(X)
+#         kmeans = KMeans(n_clusters=n_clusters, random_state=42)
+#         dff["cluster_label"] = kmeans.fit_predict(X_scaled).astype(str)
+#         color_by_plot = "cluster_label"
+#     else:
+#         if "cluster_label" in dff.columns:
+#             dff = dff.drop(columns=["cluster_label"])
+#         if color_by in ["roi", "vote_average"]:
+#             lower = dff[color_by].quantile(0.01)
+#             upper = dff[color_by].quantile(0.99)
+#             dff["ROI clipped"] = dff[color_by].clip(lower, upper)
+#             color_by_plot = "ROI clipped"
+#         else:
+#             color_by_plot = color_by
+
+
+
+#     scaler = MinMaxScaler(feature_range=(2, 80))
+#     dff["scaled_size"] = scaler.fit_transform(dff[["vote_count"]])
+#     fig = px.scatter(
+#         dff,
+#         x="budget",
+#         y="revenue",
+#         color=color_by_plot,
+#         #size="scaled_size",
+#         size="vote_count",
+#         hover_name="title_y",
+#         hover_data=["release_year", "budget", "revenue", "profit", "roi", "vote_average"],
+#         labels={
+#             "budget": "Budget ($)",
+#             "revenue": "Revenue ($)",
+#             "roi": "ROI %",
+#             "vote_average": "Rating",
+#             "primary_genre": "Genre",
+#             "cluster_label": "Cluster"
+#         },
+#         title=f"Budget vs Revenue ({year_range[0]}–{year_range[1]})",
+#         log_x=True,
+#         log_y=True
+#     )
+
+#     fig.update_layout(
+#         xaxis_title="Budget (log)",
+#         yaxis_title="Revenue (log)",
+#         hovermode="closest"
+#     )
+#     # Now filter movies visible inside zoom window, if zoom is active
+#     if relayout_data:
+#         # Extract axis ranges if present
+#         x_range = relayout_data.get("xaxis.range[0]"), relayout_data.get("xaxis.range[1]")
+#         y_range = relayout_data.get("yaxis.range[0]"), relayout_data.get("yaxis.range[1]")
+
+#         # Only filter if both ranges are defined (zoom or pan)
+#         if None not in x_range and None not in y_range:
+#             # Filter by visible budget and revenue ranges (log scale)
+#             # dff has budget and revenue in normal scale, but plot is log scaled
+#             # So filter by actual scale values
+#             budget_min, budget_max = x_range
+#             revenue_min, revenue_max = y_range
+
+#             # Because log axis, the values are in log scale, so convert back
+#             budget_min_val = 10 ** budget_min
+#             budget_max_val = 10 ** budget_max
+#             revenue_min_val = 10 ** revenue_min
+#             revenue_max_val = 10 ** revenue_max
+
+#             dff_filtered = dff[
+#                 (dff["budget"] >= budget_min_val) & (dff["budget"] <= budget_max_val) &
+#                 (dff["revenue"] >= revenue_min_val) & (dff["revenue"] <= revenue_max_val)
+#             ]
+#         else:
+#             dff_filtered = dff
+#     else:
+#         dff_filtered = dff
+#     # table_data = dff.sort_values("revenue", ascending=False).head(500)[[
+#     #     "title_y", "release_year", "budget", "revenue", "profit", "roi", "vote_average"
+#     # ]].to_dict("records")
+#     top_movies = dff.sort_values(sort_by, ascending=False).head(15)
+#     movie_list = [
+#         html.Li([
+#             html.Strong(movie["title_y"]),
+#             html.Br(),
+#             f"Year: {movie['release_year']} | Revenue: ${movie['revenue']:,.0f} | ROI: {movie['roi']:.1f}% | Rating: {movie['vote_average']:.1f}"
+#         ]) for _, movie in top_movies.iterrows()
+#     ]
+#     return fig, movie_list
 
 # PCA tab
 @app.callback(
@@ -834,31 +952,6 @@ def update_genre_sunburst(year_range, color_by):
                     'roi': row['roi'],
                     'vote_average': row['vote_average']
                 })
-    # for _, row in dff.iterrows():
-    #     genres = row['genres_y'].split('-')
-    #     if len(genres) > 0:
-    #         primary = genres[0]
-    #         genre_hierarchy.append({
-    #             'ids': primary,
-    #             'labels': primary,
-    #             'parents': '',
-    #             'values': 1,
-    #             'roi': row['roi'],
-    #             'profit': row['profit'],
-    #             'vote_average': row['vote_average']
-    #         })
-            
-    #         if len(genres) > 1:
-    #             for sub in genres[1:]:
-    #                 genre_hierarchy.append({
-    #                     'ids': f"{primary}-{sub}",
-    #                     'labels': sub,
-    #                     'parents': primary,
-    #                     'values': 1,
-    #                     'roi': row['roi'],
-    #                     'profit': row['profit'],
-    #                     'vote_average': row['vote_average']
-    #                 })
     
     hierarchy_df = pd.DataFrame(genre_hierarchy)
     
