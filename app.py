@@ -959,19 +959,28 @@ def update_genre_sunburst(year_range, color_by):
     if color_by == 'count':
         agg_df = hierarchy_df.groupby(['ids', 'labels', 'parents']).size().reset_index(name='count')
         color_col = 'count'
+        values = agg_df['count']
     else:
         agg_df = hierarchy_df.groupby(['ids', 'labels', 'parents']).agg({
             'roi': 'mean',
             'profit': 'mean',
             'vote_average': 'mean'
         }).reset_index()
-        color_col = color_by
+        if color_by in ['roi', 'vote_average']:
+            lower = agg_df[color_by].quantile(0.01)
+            upper = agg_df[color_by].quantile(0.99)
+            agg_df['color_scaled'] = agg_df[color_by].clip(lower, upper)
+            color_col = 'color_scaled'
+        else:
+            color_col = color_by
+
+        values = agg_df[color_by].abs()
     
     # Create sunburst chart
     fig = px.sunburst(
         agg_df,
         path=['parents', 'labels'],
-        values='count' if color_by == 'count' else agg_df[color_by].abs(),
+        values='count' if color_by == 'count' else values,
         color=color_col,
         hover_data=['labels'],
         title=f"Movie Genre Hierarchy ({year_range[0]}-{year_range[1]})",
