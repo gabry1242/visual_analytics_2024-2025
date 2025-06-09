@@ -4,6 +4,7 @@ import pandas as pd
 import plotly.express as px
 import numpy as np
 from sklearn.decomposition import PCA
+from sklearn.manifold import TSNE
 from sklearn.preprocessing import StandardScaler
 from sklearn.cluster import KMeans
 from sklearn.ensemble import RandomForestRegressor, RandomForestClassifier
@@ -20,6 +21,8 @@ import networkx as nx
 import seaborn as sns
 from collections import Counter
 from sklearn.preprocessing import MinMaxScaler
+import pickle
+import os
 
 # Load and prepare data
 df = pd.read_csv("merged_with_tags.csv")
@@ -361,8 +364,20 @@ revenue_model.fit(X_train, y_revenue_train)
 # Get all unique genres from the data
 all_genres = sorted(list(set([genre for sublist in df['genres_list'].dropna() for genre in sublist])))
 
+# Loading saved tsne data
+def load_tsne_data():
+    """Load precomputed TSNE data from disk."""
+    if os.path.exists('tsne_precomputed.pkl'):
+        with open('tsne_precomputed.pkl', 'rb') as f:
+            return pickle.load(f)
+    else:
+        print("Precomputed TSNE file not found. Please run precompute_tsne.py first.")
+        return None
 
-
+# Load tsne data
+tsne_data = load_tsne_data()
+if tsne_data is None:
+    print("Warning: TSNE data not found. TSNE tab will not work properly.")
 
 # Dash app setup
 app = dash.Dash(__name__, suppress_callback_exceptions=True)
@@ -463,11 +478,11 @@ app.layout = html.Div([
             ], style={"padding": "20px"})
         ]),
 
-        dcc.Tab(label="Dimensionality Reduction (PCA)", children=[
+        dcc.Tab(label="Dimensionality Reduction (TSNE)", children=[
             html.Div([
                 html.Label("Release Year Range"),
                 dcc.RangeSlider(
-                    id="pca-year-slider",
+                    id="tsne-year-slider",
                     min=df["release_year"].min(),
                     max=df["release_year"].max(),
                     step=1,
@@ -484,7 +499,7 @@ app.layout = html.Div([
                     clearable=False
                 ),
 
-                dcc.Graph(id="pca-plot", style={"height": "600px"})
+                dcc.Graph(id="tsne-plot", style={"height": "600px"})
             ], style={"padding": "20px"})
         ]),
         
@@ -697,7 +712,7 @@ app.layout = html.Div([
 
 # === Callbacks ===
 
-# Update stored cluster count when user changes it in PCA tab
+# Update stored cluster count when user changes it in TSNE tab
 @app.callback(
     Output("cluster-count-store", "data"),
     Input("cluster-count", "value")
@@ -889,35 +904,56 @@ def update_movie_table(relayout_data, year_range, sort_by):
 #     ]
 #     return fig, movie_list
 
-# PCA tab
+# TSNE tab
 @app.callback(
-    Output("pca-plot", "figure"),
-    [Input("pca-year-slider", "value"),
+    Output("tsne-plot", "figure"),
+    [Input("tsne-year-slider", "value"),
      Input("cluster-count-store", "data")]
 )
-def update_pca(year_range, n_clusters):
-    dff = df[(df["release_year"] >= year_range[0]) & (df["release_year"] <= year_range[1])]
-    dff = dff.dropna(subset=numeric_features + ["primary_genre"])
-
-    X = dff[numeric_features]
-    X_scaled = StandardScaler().fit_transform(X)
-
-    # PCA
-    pca = PCA(n_components=2)
-    components = pca.fit_transform(X_scaled)
-    dff["PC1"], dff["PC2"] = components[:, 0], components[:, 1]
-
-    # KMeans clustering
-    kmeans = KMeans(n_clusters=n_clusters, random_state=42)
-    dff["cluster"] = kmeans.fit_predict(X_scaled).astype(str)
-
+def update_tsne(year_range, n_clusters):
+    if tsne_data is None:
+        # Return empty figure with error message
+        fig = px.scatter(title="TSNE data not available. Please run precompute_tsne.py first.")
+        return fig
+    
+    # Get precomputed dataframe
+    dff = tsne_data['dataframe'].copy()
+    
+    # Filter by year range
+    dff = dff[(dff["release_year"] >= year_range[0]) & (dff["release_year"] <= year_range[1])]
+    
+    if dff.empty:
+        fig = px.scatter(title="No data available for selected year range")
+        return fig
+    
+    # Get precomputed cluster labels for the requested k
+    if n_clusters in tsne_data['clusters']:
+        # Map cluster labels back to the filtered dataframe
+        # We need to align the cluster labels with the filtered data
+        all_clusters = tsne_data['clusters'][n_clusters]
+        original_df = tsne_data['dataframe']
+        
+        # Create a mapping from index to cluster label
+        cluster_mapping = dict(zip(original_df.index, all_clusters))
+        
+        # Apply cluster labels to filtered dataframe
+        dff["cluster"] = dff.index.map(cluster_mapping).astype(str)
+    else:
+        # Fallback: compute clusters on the fly (shouldn't happen often)
+        dff["cluster"] = "0"
+    
+    # Create the plot using precomputed TSNE coordinates
     fig = px.scatter(
         dff,
-        x="PC1",
-        y="PC2",
+        x="tsne_dim1",  # Use precomputed coordinates
+        y="tsne_dim2",  # Use precomputed coordinates
         color="cluster",
         hover_name="title_y",
-        title=f"PCA Projection of Movies (k={n_clusters})"
+        title=f"TSNE Projection of Movies (k={n_clusters})",
+        labels={
+            "tsne_dim1": "TSNE Dimension 1",
+            "tsne_dim2": "TSNE Dimension 2"
+        }
     )
     fig.update_layout(hovermode="closest")
     return fig
@@ -1311,5 +1347,5 @@ def update_graph(selected_tags, color_metric, network_data):
     return fig
 
 # Run app
-if __name__ == "__main__":
+if __name__ == '__main__':
     app.run(debug=True)
