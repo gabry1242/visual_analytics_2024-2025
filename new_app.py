@@ -136,6 +136,7 @@ app.title = "Movie Success Studio"
 
 app.layout = html.Div([
     dcc.Store(id="current-filter", data={"genres": None, "scatter_ids": None, "zoom_ids": None}),
+    dcc.Store(id="prediction-store", data=None),
     # Left Column
     html.Div([
         html.Label("Color by:"),
@@ -178,7 +179,88 @@ app.layout = html.Div([
             allowCross=False
         ),
         dcc.Store(id="cluster-count-store", data=5),
-        dcc.Graph(id="scatter-plot", style={"height": "50vh", "width": "100%"})
+        dcc.Graph(id="scatter-plot", style={"height": "50vh", "width": "100%"}),
+        # Success Predictor Section
+        html.Div([
+            html.H3("Movie Success Predictor", style={'marginTop': '20px'}),
+
+            # Input controls
+            html.Div([
+                html.Div([
+                    html.Label("Budget (in millions)"),
+                    dcc.Input(id='budget-input', type='number', value=50, min=1, step=1,
+                              style={'width': '100%'})
+                ], style={'width': '18%', 'display': 'inline-block', 'marginRight': '2%'}),
+
+                html.Div([
+                    html.Label("Runtime (minutes)"),
+                    dcc.Input(id='runtime-input', type='number', value=120, min=60, max=240, step=5,
+                              style={'width': '100%'})
+                ], style={'width': '18%', 'display': 'inline-block', 'marginRight': '2%'}),
+
+                html.Div([
+                    html.Label("Original Language"),
+                    dcc.Dropdown(
+                        id='language-input',
+                        options=[{'label': 'English', 'value': 1},
+                                 {'label': 'Non-English', 'value': 0}],
+                        value=1,
+                        style={'width': '100%'}
+                    )
+                ], style={'width': '18%', 'display': 'inline-block', 'marginRight': '2%'}),
+
+                html.Div([
+                    html.Label("Release Year"),
+                    dcc.Input(id='year-input', type='number', value=2023, min=1900, max=2030, step=1,
+                              style={'width': '100%'})
+                ], style={'width': '18%', 'display': 'inline-block', 'marginRight': '2%'}),
+
+                html.Div([
+                    html.Label("Genres"),
+                    dcc.Dropdown(
+                        id='genres-input',
+                        options=[{'label': genre, 'value': genre} for genre in all_genres],
+                        multi=True,
+                        value=['Action'],
+                        style={'width': '100%'}
+                    )
+                ], style={'width': '18%', 'display': 'inline-block'}),
+            ], style={'marginBottom': '15px'}),
+
+            # Predict button
+            html.Button('Predict Success', id='predict-button', n_clicks=0,
+                        style={'background-color': '#4CAF50', 'color': 'white', 'width': '100%',
+                               'padding': '10px'}),
+
+            # Results display
+            html.Div([
+                html.Div(id='success-output', style={
+                    'fontSize': '16px', 'padding': '10px', 'marginBottom': '8px',
+                    'backgroundColor': '#f8f9fa', 'borderRadius': '5px'
+                }),
+                html.Div(id='rating-output', style={
+                    'fontSize': '16px', 'padding': '10px', 'marginBottom': '8px',
+                    'backgroundColor': '#f8f9fa', 'borderRadius': '5px'
+                }),
+                html.Div(id='revenue-output', style={
+                    'fontSize': '16px', 'padding': '10px', 'marginBottom': '8px',
+                    'backgroundColor': '#f8f9fa', 'borderRadius': '5px'
+                }),
+                html.Div(id='roi-output', style={
+                    'fontSize': '16px', 'padding': '10px', 'marginBottom': '8px',
+                    'backgroundColor': '#f8f9fa', 'borderRadius': '5px'
+                }),
+                html.H4("Recommendations for Improvement", style={'marginTop': '20px'}),
+                html.Div(id='recommendations', style={
+                    'padding': '10px',
+                    'backgroundColor': '#e9ecef',
+                    'borderRadius': '5px'
+                })
+            ], style={'marginTop': '15px'}),
+            html.Div([
+                        dcc.Graph(id='sensitivity-plot', style={'height': '100%', 'width': '100%'})
+                    ], style={'width': '58%', 'display': 'inline-block', 'padding': '10px', 'verticalAlign': 'top'})
+        ], style={'marginTop': '20px', 'padding': '10px', 'border': '1px solid #ddd', 'borderRadius': '5px'})
     ], style={"width": "80%", "display": "inline-block", "verticalAlign": "top", "padding": "10px"})
 ], style={"display": "flex"})
 
@@ -267,10 +349,11 @@ def update_current_filter(scatter_selected, sunburst_click, current_filter):
     [
         Input("year-slider", "value"),
         Input("color-by", "value"),
-        Input("current-filter", "data")  # should carry {"genres": "Horror-Thriller"} or None
+        Input("current-filter", "data"),  # should carry {"genres": "Horror-Thriller"} or None
+        Input("prediction-store", "data")
     ]
 )
-def update_scatter(year_range, color_by, current_filter):
+def update_scatter(year_range, color_by, current_filter, prediction_data):
     dff = df[(df["release_year"] >= year_range[0]) & (df["release_year"] <= year_range[1])]
 
     if current_filter and current_filter.get("genres"):
@@ -329,6 +412,24 @@ def update_scatter(year_range, color_by, current_filter):
         log_y=True,
         title=f"Budget vs Revenue ({year_range[0]}–{year_range[1]})"
     )
+
+    # Add prediction marker if available
+    if prediction_data and isinstance(prediction_data, dict) and 'budget' in prediction_data:
+        fig.add_trace(go.Scatter(
+            x=[prediction_data['budget']],
+            y=[prediction_data['revenue_pred']],
+            mode='markers',
+            marker=dict(
+                color='red',
+                size=15,
+                line=dict(width=2, color='DarkSlateGrey')
+            ),
+            name='Prediction',
+            hoverinfo='text',
+            hovertext=f"Predicted Revenue: ${prediction_data['revenue_pred'] / 1e6:.1f}M<br>"
+                      f"Predicted Rating: {prediction_data['rating_pred']:.1f}<br>"
+                      f"Success Probability: {prediction_data['success_prob']:.1%}"
+        ))
 
     fig.update_layout(
         xaxis_title="Budget (log)",
@@ -509,7 +610,8 @@ def update_movie_list(click_data, year_range):
      Output('revenue-output', 'children'),
      Output('roi-output', 'children'),
      Output('recommendations', 'children'),
-     Output('sensitivity-plot', 'figure')],
+     Output('prediction-store', 'data')],  # Store prediction data
+    Output('sensitivity-plot', 'figure'),
     [Input('predict-button', 'n_clicks')],
     [State('budget-input', 'value'),
      State('runtime-input', 'value'),
@@ -519,7 +621,7 @@ def update_movie_list(click_data, year_range):
 )
 def update_predictions(n_clicks, budget, runtime, language, year, genres):
     if n_clicks == 0:
-        return "", "", "", "", "", go.Figure()
+        return "", "", "", "", "", "", go.Figure()
     
     # Prepare input features
     input_data = pd.DataFrame({
@@ -553,8 +655,16 @@ def update_predictions(n_clicks, budget, runtime, language, year, genres):
     rating_output = f"⭐ Predicted Rating: {rating_pred:.1f}/10"
     revenue_output = f"💰 Predicted Revenue: ${revenue_pred/1000000:.1f} million"
     roi_output = f"📈 Predicted ROI: {roi:.1f}x"
+
+    # Store prediction data for scatter plot
+    prediction_data = {
+        'budget': budget * 1000000,  # Convert from millions to dollars
+        'revenue_pred': revenue_pred,
+        'rating_pred': rating_pred,
+        'success_prob': success_prob
+    }
     
-    return success_output, rating_output, revenue_output, roi_output, recommendations, fig
+    return success_output, rating_output, revenue_output, roi_output, recommendations, prediction_data, fig
 
 def generate_recommendations(budget, runtime, language, year, genres, 
                            success_prob, rating_pred, roi):
@@ -565,7 +675,7 @@ def generate_recommendations(budget, runtime, language, year, genres,
     low_rating_threshold = y_rating_train.mean()
     low_roi_threshold = (np.expm1(y_revenue_train) / np.expm1(X_train['budget_log'])).mean()
 
-    # === 2. Genre-based improvement: test adding each genre individually ===
+    # === 2. Genre-based improvement: test.py adding each genre individually ===
     if rating_pred < low_rating_threshold:
         best_improvement = 0
         best_genre = None
