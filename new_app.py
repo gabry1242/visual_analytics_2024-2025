@@ -151,88 +151,81 @@ app.layout = html.Div([
             style={"margin-bottom": "10px"}
         ),
         html.Label("Year Range:"),
-        html.Div([
-            dcc.RangeSlider(
-                id="genre-year-slider",
-                min=1980, max=2020, step=1, value=[2000, 2020],
-                marks={str(y): str(y) for y in range(1980, 2021, 5)},
-                tooltip={"always_visible": True},
-                allowCross=False
-            )
-        ], style={"margin-bottom": "20px"}),
-        dcc.Graph(id="genre-sunburst", style={"height": "40vh", "width": "100%"})
-    ], style={"width": "20%", "display": "inline-block", "verticalAlign": "top", "padding": "10px"}),
-
-    # Right Column (Scatterplot)
-    html.Div([
-        dcc.Dropdown(
-            id="color-by",
-            options=[{"label": col, "value": col} for col in ["vote_average", "roi", "runtime", "cluster_label"]],
-            value="vote_average",
-            style={"width": "200px", "margin-bottom": "10px"}
-        ),
         dcc.RangeSlider(
-            id="year-slider",
-            min=1980, max=2020, step=1, value=[2000, 2020],
-            marks={str(y): str(y) for y in range(1980, 2021, 5)},
+            id="shared-year-slider",
+            min=2000, max=2020, step=1, value=[2000, 2020],
+            marks={str(y): str(y) for y in range(2000, 2021, 5)},
             tooltip={"always_visible": True},
             allowCross=False
         ),
+        dcc.Graph(id="genre-sunburst", style={"height": "40vh", "width": "100%"}),
+
+        html.H3("Movie Success Predictor", style={'marginTop': '20px'}),
+
+        html.Div([
+            html.Label("Budget (in millions)"),
+            dcc.Input(id='budget-input', type='number', value=50, min=1, step=1,
+                      style={'width': '100%'})
+        ], style={'marginBottom': '10px'}),
+
+        html.Div([
+            html.Label("Runtime (minutes)"),
+            dcc.Input(id='runtime-input', type='number', value=120, min=60, max=240, step=5,
+                      style={'width': '100%'})
+        ], style={'marginBottom': '10px'}),
+
+        html.Div([
+            html.Label("Original Language"),
+            dcc.Dropdown(
+                id='language-input',
+                options=[{'label': 'English', 'value': 1},
+                         {'label': 'Non-English', 'value': 0}],
+                value=1,
+                style={'width': '100%'}
+            )
+        ], style={'marginBottom': '10px'}),
+
+        html.Div([
+            html.Label("Release Year"),
+            dcc.Input(id='year-input', type='number', value=2023, min=1900, max=2030, step=1,
+                      style={'width': '100%'})
+        ], style={'marginBottom': '10px'}),
+
+        html.Div([
+            html.Label("Genres"),
+            dcc.Dropdown(
+                id='genres-input',
+                options=[{'label': genre, 'value': genre} for genre in all_genres],
+                multi=True,
+                value=['Action'],
+                style={'width': '100%'}
+            )
+        ], style={'marginBottom': '10px'}),
+
+        html.Button('Predict Success', id='predict-button', n_clicks=0,
+                    style={'background-color': '#4CAF50', 'color': 'white', 'width': '100%',
+                           'padding': '10px'})
+    ], style={"width": "20%", "display": "inline-block", "verticalAlign": "top", "padding": "10px"}),
+
+    # Right Column (80%)
+    html.Div([
+        dcc.Dropdown(
+            id="color-by",
+            options=[
+                {"label": "Vote Average", "value": "vote_average"},
+                {"label": "ROI", "value": "roi"},
+                {"label": "Runtime", "value": "runtime"},
+                {"label": "Primary Genre", "value": "primary_genre"}  # New option added here
+            ],
+            value="vote_average",
+            style={"width": "200px", "margin-bottom": "10px"}
+        ),
         dcc.Store(id="cluster-count-store", data=5),
         dcc.Graph(id="scatter-plot", style={"height": "50vh", "width": "100%"}),
-        # Success Predictor Section
+
+        # Results Section Split 1:3
         html.Div([
-            html.H3("Movie Success Predictor", style={'marginTop': '20px'}),
-
-            # Input controls
-            html.Div([
-                html.Div([
-                    html.Label("Budget (in millions)"),
-                    dcc.Input(id='budget-input', type='number', value=50, min=1, step=1,
-                              style={'width': '100%'})
-                ], style={'width': '18%', 'display': 'inline-block', 'marginRight': '2%'}),
-
-                html.Div([
-                    html.Label("Runtime (minutes)"),
-                    dcc.Input(id='runtime-input', type='number', value=120, min=60, max=240, step=5,
-                              style={'width': '100%'})
-                ], style={'width': '18%', 'display': 'inline-block', 'marginRight': '2%'}),
-
-                html.Div([
-                    html.Label("Original Language"),
-                    dcc.Dropdown(
-                        id='language-input',
-                        options=[{'label': 'English', 'value': 1},
-                                 {'label': 'Non-English', 'value': 0}],
-                        value=1,
-                        style={'width': '100%'}
-                    )
-                ], style={'width': '18%', 'display': 'inline-block', 'marginRight': '2%'}),
-
-                html.Div([
-                    html.Label("Release Year"),
-                    dcc.Input(id='year-input', type='number', value=2023, min=1900, max=2030, step=1,
-                              style={'width': '100%'})
-                ], style={'width': '18%', 'display': 'inline-block', 'marginRight': '2%'}),
-
-                html.Div([
-                    html.Label("Genres"),
-                    dcc.Dropdown(
-                        id='genres-input',
-                        options=[{'label': genre, 'value': genre} for genre in all_genres],
-                        multi=True,
-                        value=['Action'],
-                        style={'width': '100%'}
-                    )
-                ], style={'width': '18%', 'display': 'inline-block'}),
-            ], style={'marginBottom': '15px'}),
-
-            # Predict button
-            html.Button('Predict Success', id='predict-button', n_clicks=0,
-                        style={'background-color': '#4CAF50', 'color': 'white', 'width': '100%',
-                               'padding': '10px'}),
-
-            # Results display
+            # Recommendations (1 part)
             html.Div([
                 html.Div(id='success-output', style={
                     'fontSize': '16px', 'padding': '10px', 'marginBottom': '8px',
@@ -256,11 +249,13 @@ app.layout = html.Div([
                     'backgroundColor': '#e9ecef',
                     'borderRadius': '5px'
                 })
-            ], style={'marginTop': '15px'}),
+            ], style={'flex': 1, 'padding': '10px'}),
+
+            # Sensitivity Plot (3 parts)
             html.Div([
-                        dcc.Graph(id='sensitivity-plot', style={'height': '100%', 'width': '100%'})
-                    ], style={'width': '58%', 'display': 'inline-block', 'padding': '10px', 'verticalAlign': 'top'})
-        ], style={'marginTop': '20px', 'padding': '10px', 'border': '1px solid #ddd', 'borderRadius': '5px'})
+                dcc.Graph(id='sensitivity-plot', style={'height': '100%', 'width': '100%'})
+            ], style={'flex': 3, 'padding': '10px'})
+        ], style={'display': 'flex', 'marginTop': '20px', 'border': '1px solid #ddd', 'borderRadius': '5px'})
     ], style={"width": "80%", "display": "inline-block", "verticalAlign": "top", "padding": "10px"})
 ], style={"display": "flex"})
 
@@ -347,13 +342,14 @@ def update_current_filter(scatter_selected, sunburst_click, current_filter):
 @app.callback(
     Output("scatter-plot", "figure"),
     [
-        Input("year-slider", "value"),
+        Input("shared-year-slider", "value"),
         Input("color-by", "value"),
         Input("current-filter", "data"),  # should carry {"genres": "Horror-Thriller"} or None
         Input("prediction-store", "data")
-    ]
+    ],
+    [State("scatter-plot", "relayoutData")]
 )
-def update_scatter(year_range, color_by, current_filter, prediction_data):
+def update_scatter(year_range, color_by, current_filter, prediction_data, relayout_data):
     dff = df[(df["release_year"] >= year_range[0]) & (df["release_year"] <= year_range[1])]
 
     if current_filter and current_filter.get("genres"):
@@ -436,6 +432,19 @@ def update_scatter(year_range, color_by, current_filter, prediction_data):
         yaxis_title="Revenue (log)",
         hovermode="closest"
     )
+
+        # --- Preserve zoom manually ---
+    if relayout_data is not None:
+        x0 = relayout_data.get("xaxis.range[0]") or relayout_data.get("xaxis.range", [None, None])[0]
+        x1 = relayout_data.get("xaxis.range[1]") or relayout_data.get("xaxis.range", [None, None])[1]
+        y0 = relayout_data.get("yaxis.range[0]") or relayout_data.get("yaxis.range", [None, None])[0]
+        y1 = relayout_data.get("yaxis.range[1]") or relayout_data.get("yaxis.range", [None, None])[1]
+
+        if all(v is not None for v in [x0, x1]):
+            fig.update_layout(xaxis=dict(range=[x0, x1]))
+        if all(v is not None for v in [y0, y1]):
+            fig.update_layout(yaxis=dict(range=[y0, y1]))
+
     return fig
 
 @app.callback(
@@ -478,7 +487,7 @@ def update_movie_table(relayout_data, year_range, sort_by):
 @app.callback(
     Output("genre-sunburst", "figure"),
     [
-        Input("genre-year-slider", "value"),
+        Input("shared-year-slider", "value"),
         Input("genre-color-by", "value"),
         Input("current-filter", "data")
     ]
