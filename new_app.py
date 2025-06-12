@@ -27,7 +27,6 @@ df = pd.read_csv("merged_with_tags.csv")
 df = df.dropna(subset=["budget", "revenue", "release_year", "title_y", "vote_count", 'genres_y'])
 df = df.drop_duplicates(subset=['title_y'])
 df["release_year"] = df["release_year"].astype(int)
-
 # Extra metrics
 df["profit"] = df["revenue"] - df["budget"]
 df["profit_margin"] = (df["profit"] / df["budget"]).replace([np.inf, -np.inf], np.nan)
@@ -397,24 +396,25 @@ def update_scatter(year_range, color_by, x_axis, y_axis,current_filter, predicti
 
     if current_filter and current_filter.get("genres"):
         clicked_id = current_filter["genres"]
-        genres_selected = clicked_id.split('-')
-        if not genres_selected:
-            # No valid genre - skip filtering
-            pass
-        else:
-            primary_genre = genres_selected[0]
-            if len(primary_genre.split('/')) == 1:
-                sub_genres = primary_genre
-            else:
-                parts = primary_genre.split('/')
-                sub_genres = parts[0] + '-' + parts[1]
+        genres_selected = clicked_id.split('/')
 
-            def genre_match(row):
-                if pd.isna(row['genres_y']):
+        if len(genres_selected) == 1:
+            selected_primary = genres_selected[0]
+
+            def match_primary_genre(row):
+                if pd.isna(row["genres_y"]):
                     return False
-                return sub_genres in row['genres_y']
+                return row["genres_y"].split('-')[0] == selected_primary
 
-            dff = dff[dff.apply(genre_match, axis=1)]
+            dff = dff[dff.apply(match_primary_genre, axis=1)]
+
+        elif len(genres_selected) == 2:
+            exact_genre = '-'.join(genres_selected)
+
+            def match_exact_genre(row):
+                return row["genres_y"] == exact_genre
+
+            dff = dff[dff.apply(match_exact_genre, axis=1)]
 
 
     if dff.empty:
@@ -447,7 +447,7 @@ def update_scatter(year_range, color_by, x_axis, y_axis,current_filter, predicti
         hover_name="title_y",
         hover_data=["release_year", "budget", "revenue", "profit", "roi", "vote_average"],
         labels={"color_clip": color_by},
-        title=f"{x_axis.title()} vs {y_axis.title()} ({year_range[0]}–{year_range[1]})",
+        # title=f"{x_axis.title()} vs {y_axis.title()} ({year_range[0]}–{year_range[1]})",
         log_x=x_axis in ["budget", "revenue", "profit", "roi"],
         log_y=y_axis in ["budget", "revenue", "profit", "roi"]
     )
@@ -592,7 +592,7 @@ def update_sunburst(year_range, color_by, current_filter):
         path=['parents', 'labels'],
         values='count' if color_by == 'count' else values,
         color=color_col,
-        title=f"Movie Genre Hierarchy ({year_range[0]}–{year_range[1]})",
+        # title=f"Movie Genre Hierarchy ({year_range[0]}–{year_range[1]})",
         branchvalues="total"
     )
 
