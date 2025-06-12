@@ -209,17 +209,57 @@ app.layout = html.Div([
 
     # Right Column (80%)
     html.Div([
-        dcc.Dropdown(
-            id="color-by",
-            options=[
-                {"label": "Vote Average", "value": "vote_average"},
-                {"label": "ROI", "value": "roi"},
-                {"label": "Runtime", "value": "runtime"},
-                {"label": "Primary Genre", "value": "primary_genre"}  # New option added here
-            ],
-            value="vote_average",
-            style={"width": "200px", "margin-bottom": "10px"}
-        ),
+        html.Div([
+            html.Div([
+                html.Label("Color by:"),
+                dcc.Dropdown(
+                    id="color-by",
+                    options=[
+                        {"label": "Vote Average", "value": "vote_average"},
+                        {"label": "ROI", "value": "roi"},
+                        {"label": "Runtime", "value": "runtime"},
+                        {"label": "Primary Genre", "value": "primary_genre"},
+                        {"label": "Profit", "value": "profit"}
+                    ],
+                    value="vote_average",
+                    style={"width": "200px", "marginRight": "10px"}
+                )
+            ], style={"display": "inline-block", "verticalAlign": "top"}),
+
+            html.Div([
+                html.Label("X-axis:"),
+                dcc.Dropdown(
+                    id="x-axis-dropdown",
+                    options=[
+                        {"label": "Budget", "value": "budget"},
+                        {"label": "Revenue", "value": "revenue"},
+                        {"label": "Profit", "value": "profit"},
+                        {"label": "ROI", "value": "roi"},
+                        {"label": "Vote Average", "value": "vote_average"},
+                        {"label": "Runtime", "value": "runtime"}
+                    ],
+                    value="budget",
+                    style={"width": "200px"}
+                )
+            ], style={"display": "inline-block", "verticalAlign": "top", "marginLeft": "20px"}),
+
+            html.Div([
+                html.Label("Y-axis:"),
+                dcc.Dropdown(
+                    id="y-axis-dropdown",
+                    options=[
+                        {"label": "Revenue", "value": "revenue"},
+                        {"label": "Budget", "value": "budget"},
+                        {"label": "Profit", "value": "profit"},
+                        {"label": "ROI", "value": "roi"},
+                        {"label": "Vote Average", "value": "vote_average"},
+                        {"label": "Runtime", "value": "runtime"}
+                    ],
+                    value="revenue",
+                    style={"width": "200px", "marginLeft": "20px"}
+                )
+            ], style={"display": "inline-block", "verticalAlign": "top", "marginLeft": "20px"})
+        ], style={"margin-bottom": "10px"}),
         dcc.Store(id="cluster-count-store", data=5),
         dcc.Graph(id="scatter-plot", style={"height": "50vh", "width": "100%"}),
 
@@ -344,12 +384,15 @@ def update_current_filter(scatter_selected, sunburst_click, current_filter):
     [
         Input("shared-year-slider", "value"),
         Input("color-by", "value"),
-        Input("current-filter", "data"),  # should carry {"genres": "Horror-Thriller"} or None
+        Input("x-axis-dropdown", "value"),
+        Input("y-axis-dropdown", "value"),
+        Input("current-filter", "data"),
         Input("prediction-store", "data")
     ],
     [State("scatter-plot", "relayoutData")]
 )
-def update_scatter(year_range, color_by, current_filter, prediction_data, relayout_data):
+def update_scatter(year_range, color_by, x_axis, y_axis,current_filter, prediction_data, relayout_data):
+    
     dff = df[(df["release_year"] >= year_range[0]) & (df["release_year"] <= year_range[1])]
 
     if current_filter and current_filter.get("genres"):
@@ -397,16 +440,16 @@ def update_scatter(year_range, color_by, current_filter, prediction_data, relayo
 
     fig = px.scatter(
         dff,
-        x="budget",
-        y="revenue",
+        x=x_axis,
+        y=y_axis,
         color=color_by_plot,
         size="vote_count",
         hover_name="title_y",
         hover_data=["release_year", "budget", "revenue", "profit", "roi", "vote_average"],
         labels={"color_clip": color_by},
-        log_x=True,
-        log_y=True,
-        title=f"Budget vs Revenue ({year_range[0]}–{year_range[1]})"
+        title=f"{x_axis.title()} vs {y_axis.title()} ({year_range[0]}–{year_range[1]})",
+        log_x=x_axis in ["budget", "revenue", "profit", "roi"],
+        log_y=y_axis in ["budget", "revenue", "profit", "roi"]
     )
 
     # Add prediction marker if available
@@ -428,22 +471,18 @@ def update_scatter(year_range, color_by, current_filter, prediction_data, relayo
         ))
 
     fig.update_layout(
-        xaxis_title="Budget (log)",
-        yaxis_title="Revenue (log)",
+        xaxis_title=x_axis.replace("_", " ").title(),
+        yaxis_title=y_axis.replace("_", " ").title(),
         hovermode="closest"
     )
 
-        # --- Preserve zoom manually ---
-    if relayout_data is not None:
-        x0 = relayout_data.get("xaxis.range[0]") or relayout_data.get("xaxis.range", [None, None])[0]
-        x1 = relayout_data.get("xaxis.range[1]") or relayout_data.get("xaxis.range", [None, None])[1]
-        y0 = relayout_data.get("yaxis.range[0]") or relayout_data.get("yaxis.range", [None, None])[0]
-        y1 = relayout_data.get("yaxis.range[1]") or relayout_data.get("yaxis.range", [None, None])[1]
-
-        if all(v is not None for v in [x0, x1]):
-            fig.update_layout(xaxis=dict(range=[x0, x1]))
-        if all(v is not None for v in [y0, y1]):
-            fig.update_layout(yaxis=dict(range=[y0, y1]))
+    # --- Preserve zoom manually ---
+    if relayout_data:
+        for axis in ["xaxis", "yaxis"]:
+            r0 = relayout_data.get(f"{axis}.range[0]")
+            r1 = relayout_data.get(f"{axis}.range[1]")
+            if r0 is not None and r1 is not None:
+                fig.update_layout(**{axis: dict(range=[r0, r1])})
 
     return fig
 
