@@ -163,13 +163,13 @@ app.layout = html.Div([
 
         html.Div([
             html.Label("Budget (in millions)"),
-            dcc.Input(id='budget-input', type='number', value=50, min=1, step=1,
+            dcc.Input(id='budget-input', type='number', value=50, min=0.1, step=0.01,
                       style={'width': '100%'})
         ], style={'marginBottom': '10px'}),
 
         html.Div([
             html.Label("Runtime (minutes)"),
-            dcc.Input(id='runtime-input', type='number', value=120, min=60, max=240, step=5,
+            dcc.Input(id='runtime-input', type='number', value=120, min=60, max=240, step=1,
                       style={'width': '100%'})
         ], style={'marginBottom': '10px'}),
 
@@ -184,11 +184,6 @@ app.layout = html.Div([
             )
         ], style={'marginBottom': '10px'}),
 
-        html.Div([
-            html.Label("Release Year"),
-            dcc.Input(id='year-input', type='number', value=2023, min=1900, max=2030, step=1,
-                      style={'width': '100%'})
-        ], style={'marginBottom': '10px'}),
 
         html.Div([
             html.Label("Genres"),
@@ -438,6 +433,7 @@ def update_scatter(year_range, color_by, x_axis, y_axis,current_filter, predicti
     scaler = MinMaxScaler(feature_range=(2, 80))
     dff["scaled_size"] = scaler.fit_transform(dff[["vote_count"]])
 
+
     fig = px.scatter(
         dff,
         x=x_axis,
@@ -452,22 +448,26 @@ def update_scatter(year_range, color_by, x_axis, y_axis,current_filter, predicti
         log_y=y_axis in ["budget", "revenue", "profit", "roi"]
     )
 
+    # fig.update_traces(type='scatter', selector=dict(type='scattergl'))
     # Add prediction marker if available
-    if prediction_data and isinstance(prediction_data, dict) and 'budget' in prediction_data:
-        fig.add_trace(go.Scatter(
+    if isinstance(prediction_data, dict) and {'budget', 'revenue_pred'}.issubset(prediction_data):
+        fig.add_trace(go.Scattergl(               # stessa “famiglia” dei point cloud
             x=[prediction_data['budget']],
             y=[prediction_data['revenue_pred']],
             mode='markers',
             marker=dict(
                 color='red',
                 size=15,
-                line=dict(width=2, color='DarkSlateGrey')
+                line=dict(width=3, color='black')
             ),
             name='Prediction',
-            hoverinfo='text',
-            hovertext=f"Predicted Revenue: ${prediction_data['revenue_pred'] / 1e6:.1f}M<br>"
-                      f"Predicted Rating: {prediction_data['rating_pred']:.1f}<br>"
-                      f"Success Probability: {prediction_data['success_prob']:.1%}"
+            hovertemplate=(
+                "Predicted Revenue: $%{y:.2s}<br>"
+                "Predicted Rating: %{customdata[0]:.1f}<br>"
+                "Success Probability: %{customdata[1]:.1%}<extra></extra>"
+            ),
+            customdata=[[prediction_data['rating_pred'],
+                        prediction_data['success_prob']]]
         ))
 
     fig.update_layout(
@@ -664,10 +664,10 @@ def update_movie_list(click_data, year_range):
     [State('budget-input', 'value'),
      State('runtime-input', 'value'),
      State('language-input', 'value'),
-     State('year-input', 'value'),
      State('genres-input', 'value')]
 )
-def update_predictions(n_clicks, budget, runtime, language, year, genres):
+def update_predictions(n_clicks, budget, runtime, language, genres):
+    year = 2025
     if n_clicks == 0:
         return "", "", "", "", "", "", go.Figure()
     
