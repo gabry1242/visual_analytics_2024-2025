@@ -157,9 +157,9 @@ app.layout = html.Div([
             tooltip={"always_visible": True},
             allowCross=False
         ),
-        dcc.Graph(id="genre-sunburst", style={"height": "40vh", "width": "100%"}),
-
-        html.H3("Movie Success Predictor", style={'marginTop': '20px'}),
+        # dcc.Graph(id="genre-sunburst", style={"height": "40vh", "width": "100%"}),
+        dcc.Graph(id="genre-icicle"),
+        html.H3("Movie Success Predictor", style={'marginTop': '20px', 'width': '100%'}),
 
         html.Div([
             html.Label("Budget (in millions)"),
@@ -342,11 +342,11 @@ def update_filter_from_zoom(relayout_data, current_filter):
     Output("current-filter", "data"),
     [
         Input("scatter-plot", "selectedData"),
-        Input("genre-sunburst", "clickData")
+        Input("genre-icicle", "clickData")
     ],
     State("current-filter", "data")
 )
-def update_current_filter(scatter_selected, sunburst_click, current_filter):
+def update_current_filter(scatter_selected, icicle_click, current_filter):
     ctx = callback_context
 
     if current_filter is None:
@@ -363,12 +363,12 @@ def update_current_filter(scatter_selected, sunburst_click, current_filter):
         selected_titles = [point["hovertext"] for point in scatter_selected["points"]]
         return {**current_filter, "scatter_ids": selected_titles}
 
-    elif triggered_id == "genre-sunburst":
-        if sunburst_click is None:
-            return {**current_filter, "genres": None}
-        clicked_id = sunburst_click["points"][0].get("id", None)
-        return {**current_filter, "genres": clicked_id}
 
+    elif triggered_id == "genre-icicle":
+        if icicle_click is None:
+            return {**current_filter, "genres": None}
+        clicked_id = icicle_click["points"][0].get("id", None)
+        return {**current_filter, "genres": clicked_id}
     return current_filter
 
 
@@ -523,16 +523,147 @@ def update_movie_table(relayout_data, year_range, sort_by):
 
 
 # Genre Exploration tab
+# @app.callback(
+#     Output("genre-sunburst", "figure"),
+#     [
+#         Input("shared-year-slider", "value"),
+#         Input("genre-color-by", "value"),
+#         Input("current-filter", "data")
+#     ]
+# )
+# def update_sunburst(year_range, color_by, current_filter):
+#     dff = df[(df["release_year"] >= year_range[0]) & (df["release_year"] <= year_range[1])]
+
+#     if current_filter:
+#         if current_filter.get("zoom_ids"):
+#             dff = dff[dff["title_y"].isin(current_filter["zoom_ids"])]
+#         elif current_filter.get("scatter_ids"):
+#             dff = dff[dff["title_y"].isin(current_filter["scatter_ids"])]
+
+#     genre_hierarchy = []
+#     for _, row in dff.iterrows():
+#         if pd.isna(row['genres_y']):
+#             continue
+#         genres = row['genres_y'].split('-')
+#         print(genres)
+#         if len(genres) > 1:
+#             primary = genres[0]
+#             for sub in genres[1:]:
+#                 genre_hierarchy.append({
+#                     'primary': primary,
+#                     'sub': sub,
+#                     'ids': f"{primary}-{sub}",
+#                     'labels': sub,
+#                     'parents': primary,
+#                     'budget': row['budget'],
+#                     'revenue': row['revenue'],
+#                     'profit': row['profit'],
+#                     'roi': row['roi'],
+#                     'vote_average': row['vote_average']
+#                 })
+
+#     if not genre_hierarchy:
+#         return px.sunburst(title="No genre data available.")
+
+#     hierarchy_df = pd.DataFrame(genre_hierarchy)
+
+#     if color_by == 'count':
+#         agg_df = hierarchy_df.groupby(['ids', 'labels', 'parents']).size().reset_index(name='count')
+#         color_col = 'count'
+#         values = agg_df['count']
+#     else:
+#         agg_df = hierarchy_df.groupby(['ids', 'labels', 'parents']).agg({
+#             'roi': 'mean',
+#             'profit': 'mean',
+#             'vote_average': 'mean'
+#         }).reset_index()
+
+#         if color_by in ['roi', 'vote_average']:
+#             lower = agg_df[color_by].quantile(0.01)
+#             upper = agg_df[color_by].quantile(0.99)
+#             agg_df['color_scaled'] = agg_df[color_by].clip(lower, upper)
+#             color_col = 'color_scaled'
+#         else:
+#             color_col = color_by
+
+#         values = agg_df[color_by].abs()
+
+#     fig = px.sunburst(
+#         agg_df,
+#         path=['parents', 'labels'],
+#         values='count' if color_by == 'count' else values,
+#         color=color_col,
+#         # title=f"Movie Genre Hierarchy ({year_range[0]}–{year_range[1]})",
+#         branchvalues="total"
+#     )
+
+#     fig.update_layout(
+#         margin=dict(t=40, l=0, r=0, b=0),
+#         hovermode="closest"
+#     )
+
+#     return fig
+
+    
+
+# # Handle clicks on the sunburst to show movies in the selected genre
+# @app.callback(
+#     Output("movie-list-items", "children"),
+#     [Input("genre-sunburst", "clickData"),
+#     Input("genre-year-slider", "value")]
+# )
+# def update_movie_list(click_data, year_range):
+#     if click_data is None:
+#         return []
+
+#     dff = df[(df["release_year"] >= year_range[0]) & (df["release_year"] <= year_range[1])]
+    
+#     # Get the full ID clicked (e.g., 'Horror-Thriller' or just 'Horror')
+#     clicked_id = click_data['points'][0].get('id', '')
+    
+#     # Split the clicked id to get hierarchy path
+#     genres_selected = clicked_id.split('-') 
+    
+#     if not genres_selected:
+#         return []
+
+
+#     primary_genre = genres_selected[0]
+#     if len(primary_genre.split('/')) == 1:
+#         sub_genres = primary_genre
+#     else:
+#         sub_genres = primary_genre.split('/')
+#         sub_genres = sub_genres[0]+'-'+sub_genres[1]
+
+#     # Filter rows where genres match the full path (order matters!)
+#     def genre_match(row):
+#         if pd.isna(row['genres_y']):
+#             return False
+#         return sub_genres in row['genres_y']
+
+#     filtered_movies = dff[dff.apply(genre_match, axis=1)]
+#     filtered_movies = filtered_movies.sort_values('revenue', ascending=False).head(15)
+
+#     return [
+#         html.Li([
+#             html.Strong(movie['title_y']),
+#             html.Br(),
+#             f"Year: {movie['release_year']} | Revenue: ${movie['revenue']:,.0f} | ROI: {movie['roi']:.1f}%"
+#         ]) for _, movie in filtered_movies.iterrows()
+#     ]
+
+
 @app.callback(
-    Output("genre-sunburst", "figure"),
+    Output("genre-icicle", "figure"),
     [
         Input("shared-year-slider", "value"),
         Input("genre-color-by", "value"),
         Input("current-filter", "data")
     ]
 )
-def update_sunburst(year_range, color_by, current_filter):
+def update_icicle(year_range, color_by, current_filter):
     dff = df[(df["release_year"] >= year_range[0]) & (df["release_year"] <= year_range[1])]
+
 
     if current_filter:
         if current_filter.get("zoom_ids"):
@@ -541,6 +672,17 @@ def update_sunburst(year_range, color_by, current_filter):
             dff = dff[dff["title_y"].isin(current_filter["scatter_ids"])]
 
     genre_hierarchy = []
+
+        # First collect all primary genres (unique)
+    primary_genres = set()
+    for _, row in dff.iterrows():
+        if pd.isna(row['genres_y']):
+            continue
+        genres = row['genres_y'].split('-')
+        if genres:
+            primary_genres.add(genres[0])
+
+
     for _, row in dff.iterrows():
         if pd.isna(row['genres_y']):
             continue
@@ -554,6 +696,7 @@ def update_sunburst(year_range, color_by, current_filter):
                     'ids': f"{primary}-{sub}",
                     'labels': sub,
                     'parents': primary,
+                    'value': 1,  # or some meaningful metric, or fixed small value
                     'budget': row['budget'],
                     'revenue': row['revenue'],
                     'profit': row['profit'],
@@ -562,56 +705,74 @@ def update_sunburst(year_range, color_by, current_filter):
                 })
 
     if not genre_hierarchy:
-        return px.sunburst(title="No genre data available.")
+        return px.icicle(title="No genre data available.")
 
-    hierarchy_df = pd.DataFrame(genre_hierarchy)
-
+    df_hier = pd.DataFrame(genre_hierarchy)
     if color_by == 'count':
-        agg_df = hierarchy_df.groupby(['ids', 'labels', 'parents']).size().reset_index(name='count')
-        color_col = 'count'
-        values = agg_df['count']
+        agg_df = df_hier.groupby(['ids', 'labels', 'parents']).size().reset_index(name='value')
+        color_col = 'value'
     else:
-        agg_df = hierarchy_df.groupby(['ids', 'labels', 'parents']).agg({
+        agg_df = df_hier.groupby(['ids', 'labels', 'parents']).agg({
             'roi': 'mean',
             'profit': 'mean',
             'vote_average': 'mean'
         }).reset_index()
 
+        color_col = color_by
+
         if color_by in ['roi', 'vote_average']:
             lower = agg_df[color_by].quantile(0.01)
             upper = agg_df[color_by].quantile(0.99)
-            agg_df['color_scaled'] = agg_df[color_by].clip(lower, upper)
-            color_col = 'color_scaled'
-        else:
-            color_col = color_by
+            agg_df[color_by] = agg_df[color_by].clip(lower, upper)
 
-        values = agg_df[color_by].abs()
+    # Step 1: Make a copy
+    normalized_df = agg_df.copy()
 
-    fig = px.sunburst(
-        agg_df,
+    # Step 2: Extract the top-level genre from the 'ids' field
+    # Assuming the format is like: "Action-Adventure" or just "Action"
+    normalized_df['primary'] = normalized_df['ids'].apply(lambda x: x.split('-')[0])
+
+    # Step 3: Compute total value per primary genre
+    # total_values = normalized_df.groupby('primary')['value'].sum().to_dict()
+
+    # # Step 4: Create the new normalized column
+    # normalized_df['relative_value'] = normalized_df.apply(
+    #     lambda row: row['value'] / total_values[row['primary']] if row['primary'] in total_values and total_values[row['primary']] != 0 else 0,
+    #     axis=1
+    # )
+    subgenres_only = normalized_df[normalized_df['parents'] != '']
+
+
+    # Step 3: Keep only subgenres (i.e., ones with a parent)
+    subgenres_only = normalized_df[normalized_df['parents'] != '']
+
+    # Step 4: Count subgenres per primary
+    subgenre_counts = subgenres_only.groupby('primary').size().to_dict()
+    subgenres_only['relative_value'] = subgenres_only['primary'].apply(
+    lambda p: 1 / subgenre_counts[p] if subgenre_counts.get(p, 0) > 0 else 0
+)
+    print(subgenres_only)
+    
+    
+    fig = px.icicle(
+        subgenres_only,
         path=['parents', 'labels'],
-        values='count' if color_by == 'count' else values,
+        values='relative_value',
         color=color_col,
-        # title=f"Movie Genre Hierarchy ({year_range[0]}–{year_range[1]})",
-        branchvalues="total"
+        branchvalues='total',
     )
 
-    fig.update_layout(
-        margin=dict(t=40, l=0, r=0, b=0),
-        hovermode="closest"
-    )
+    fig.update_layout(margin=dict(t=40, l=0, r=0, b=0))
 
     return fig
 
-    
 
-# Handle clicks on the sunburst to show movies in the selected genre
 @app.callback(
     Output("movie-list-items", "children"),
-    [Input("genre-sunburst", "clickData"),
-    Input("genre-year-slider", "value")]
+    [Input("genre-icicle", "clickData"),
+     Input("genre-year-slider", "value")]
 )
-def update_movie_list(click_data, year_range):
+def update_movies_from_icicle(click_data, year_range):
     if click_data is None:
         return []
 
@@ -650,7 +811,6 @@ def update_movie_list(click_data, year_range):
             f"Year: {movie['release_year']} | Revenue: ${movie['revenue']:,.0f} | ROI: {movie['roi']:.1f}%"
         ]) for _, movie in filtered_movies.iterrows()
     ]
-
 # ====== New Callbacks for Success Prediction ======
 @app.callback(
     [Output('success-output', 'children'),
