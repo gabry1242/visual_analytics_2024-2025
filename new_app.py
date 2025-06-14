@@ -450,25 +450,42 @@ def update_scatter(year_range, color_by, x_axis, y_axis,current_filter, predicti
 
     # fig.update_traces(type='scatter', selector=dict(type='scattergl'))
     # Add prediction marker if available
-    if isinstance(prediction_data, dict) and {'budget', 'revenue_pred'}.issubset(prediction_data):
-        fig.add_trace(go.Scattergl(               # stessa “famiglia” dei point cloud
-            x=[prediction_data['budget']],
-            y=[prediction_data['revenue_pred']],
-            mode='markers',
-            marker=dict(
-                color='red',
-                size=15,
-                line=dict(width=3, color='black')
-            ),
-            name='Prediction',
-            hovertemplate=(
-                "Predicted Revenue: $%{y:.2s}<br>"
-                "Predicted Rating: %{customdata[0]:.1f}<br>"
-                "Success Probability: %{customdata[1]:.1%}<extra></extra>"
-            ),
-            customdata=[[prediction_data['rating_pred'],
-                        prediction_data['success_prob']]]
-        ))
+    if isinstance(prediction_data, dict):
+        # Map axis names to prediction_data keys
+        pred_axis_map = {
+            'budget': 'budget',
+            'revenue': 'revenue_pred',  # Note: predicted revenue key
+            'profit': 'profit_pred' if 'profit_pred' in prediction_data else None,
+            'roi': 'roi_pred' if 'roi_pred' in prediction_data else None,
+            'vote_average': 'rating_pred',
+            'runtime': 'runtime_pred' if 'runtime_pred' in prediction_data else None,
+            # Add more mappings if available
+        }
+
+        pred_x_key = pred_axis_map.get(x_axis)
+        pred_y_key = pred_axis_map.get(y_axis)
+
+        # Check if both keys are valid and present in prediction_data
+        if pred_x_key in prediction_data and pred_y_key in prediction_data:
+            fig.add_trace(go.Scattergl(
+                x=[prediction_data[pred_x_key]],
+                y=[prediction_data[pred_y_key]],
+                mode='markers',
+                marker=dict(
+                    color='red',
+                    size=15,
+                    line=dict(width=3, color='black')
+                ),
+                name='Prediction',
+                hovertemplate=(
+                    f"Predicted {x_axis.replace('_',' ').title()}: $%{{x:.2s}}<br>"
+                    f"Predicted {y_axis.replace('_',' ').title()}: $%{{y:.2s}}<br>"
+                    "Predicted Rating: %{customdata[0]:.1f}<br>"
+                    "Success Probability: %{customdata[1]:.1%}<extra></extra>"
+                ),
+                customdata=[[prediction_data.get('rating_pred', None),
+                            prediction_data.get('success_prob', None)]]
+            ))
 
     fig.update_layout(
         xaxis_title=x_axis.replace("_", " ").title(),
@@ -866,10 +883,13 @@ def update_predictions(n_clicks, budget, runtime, language, genres):
 
     # Store prediction data for scatter plot
     prediction_data = {
-        'budget': budget * 1000000,  # Convert from millions to dollars
+        'budget': budget * 1000000,
         'revenue_pred': revenue_pred,
+        'profit_pred': revenue_pred- budget* 1000000,
         'rating_pred': rating_pred,
-        'success_prob': success_prob
+        'success_prob': success_prob,
+        'runtime_pred': runtime,
+        'roi_pred': roi
     }
     
     return success_output, rating_output, revenue_output, roi_output, recommendations, prediction_data, fig
