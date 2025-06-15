@@ -337,7 +337,7 @@ def update_filter_from_zoom(relayout_data, current_filter, x_axis, y_axis):
     if current_filter.get("genres"):
         selected_genre = current_filter["genres"]
         if '-' in selected_genre:
-            zoom_dff = zoom_dff[zoom_dff["genres_y"].str.contains(selected_genre, na=False)]
+            zoom_dff = zoom_dff[zoom_dff["genres_y"].str.startswith(selected_genre, na=False)]
         else:
             zoom_dff = zoom_dff[zoom_dff["genres_y"].str.startswith(selected_genre, na=False)]
     
@@ -401,9 +401,27 @@ def update_current_filter(scatter_selected, icicle_click, current_filter):
     elif triggered_id == "genre-icicle":
         if icicle_click is None:
             return {**current_filter, "genres": None}
+    #     clicked_id = icicle_click["points"][0].get("id", None)
+    #     return {**current_filter, "genres": clicked_id}
+    # return current_filter
+
         clicked_id = icicle_click["points"][0].get("id", None)
+        path = clicked_id.split("/")
+        # The path now has format: "All Movies/Parent Genre/Subgenre"
+        if len(path) == 3:  # Clicked on a subgenre
+            parent_genre = path[1]
+            subgenre = path[2]
+            clicked_id = f"{parent_genre}/{subgenre}"
+        elif len(path) == 2:  # Clicked on a parent genre
+            clicked_id = path[1]
+        else:
+            clicked_id = None
+            
         return {**current_filter, "genres": clicked_id}
+    
     return current_filter
+    
+
 
 
 ###SCATTERPLOT###
@@ -802,19 +820,29 @@ def update_icicle(year_range, color_by, current_filter):
     subgenres_only['relative_value'] = subgenres_only['primary'].apply(
     lambda p: 1 / subgenre_counts[p] if subgenre_counts.get(p, 0) > 0 else 0
 )
-    print(subgenres_only)
-    
+
+    subgenres_only['root'] = 'All Movies'
     
     fig = px.icicle(
         subgenres_only,
-        path=['parents', 'labels'],
+        path=['root','parents', 'labels'],
         values='relative_value',
         color=color_col,
         branchvalues='total',
     )
 
-    fig.update_layout(margin=dict(t=40, l=0, r=0, b=0))
 
+    fig.update_layout(
+        margin=dict(t=40, l=0, r=0, b=0),
+        # Add these to control the breadcrumbs
+        showlegend=True,
+        # Force consistent breadcrumb display
+        annotations=[]  # This can help with consistency
+    )
+#     fig.update_traces(
+#     pathbar_visible=True,  # Explicitly show/hide the path bar
+#     pathbar_thickness=20   # Control thickness
+# )
     return fig
 
 
