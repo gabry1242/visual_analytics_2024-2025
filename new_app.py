@@ -304,33 +304,67 @@ from dash.dependencies import Input, Output, State
 @app.callback(
     Output("current-filter", "data", allow_duplicate=True),
     Input("scatter-plot", "relayoutData"),
-    State("current-filter", "data"),
+    [
+        State("current-filter", "data"),
+        State("x-axis-dropdown", "value"),
+        State("y-axis-dropdown", "value")
+    ],
     prevent_initial_call=True
 )
-def update_filter_from_zoom(relayout_data, current_filter):
+def update_filter_from_zoom(relayout_data, current_filter, x_axis, y_axis):
     if current_filter is None:
         current_filter = {"genres": None, "scatter_ids": None, "zoom_ids": None}
 
     if not relayout_data:
         return {**current_filter, "zoom_ids": None}
 
-    keys = ["xaxis.range[0]", "xaxis.range[1]", "yaxis.range[0]", "yaxis.range[1]"]
-    if not all(k in relayout_data for k in keys):
+    # Check if we have axis range data (for either linear or log axes)
+    x_keys = [f"xaxis.range[0]", f"xaxis.range[1]"]
+    y_keys = [f"yaxis.range[0]", f"yaxis.range[1]"]
+    
+    if not (all(k in relayout_data for k in x_keys) and all(k in relayout_data for k in y_keys)):
         return {**current_filter, "zoom_ids": None}
 
-    x0 = relayout_data["xaxis.range[0]"]
-    x1 = relayout_data["xaxis.range[1]"]
-    y0 = relayout_data["yaxis.range[0]"]
-    y1 = relayout_data["yaxis.range[1]"]
+    x0 = relayout_data[x_keys[0]]
+    x1 = relayout_data[x_keys[1]]
+    y0 = relayout_data[y_keys[0]]
+    y1 = relayout_data[y_keys[1]]
 
-    budget_min = 10 ** x0
-    budget_max = 10 ** x1
-    revenue_min = 10 ** y0
-    revenue_max = 10 ** y1
-
-    zoom_dff = df[
-        (df["budget"] >= budget_min) & (df["budget"] <= budget_max) &
-        (df["revenue"] >= revenue_min) & (df["revenue"] <= revenue_max)
+    # Start with full dataset
+    zoom_dff = df
+    
+    # Apply genre filter if one exists
+    if current_filter.get("genres"):
+        selected_genre = current_filter["genres"]
+        if '-' in selected_genre:
+            zoom_dff = zoom_dff[zoom_dff["genres_y"].str.contains(selected_genre, na=False)]
+        else:
+            zoom_dff = zoom_dff[zoom_dff["genres_y"].str.startswith(selected_genre, na=False)]
+    
+    # Handle axis transformations based on current axis type
+    x_log = x_axis in ["budget", "revenue", "profit", "roi"]
+    y_log = y_axis in ["budget", "revenue", "profit", "roi"]
+    
+    # Apply x-axis filter
+    if x_log:
+        x_min = 10 ** x0 if x0 is not None else 0
+        x_max = 10 ** x1 if x1 is not None else float('inf')
+    else:
+        x_min = x0 if x0 is not None else 0
+        x_max = x1 if x1 is not None else float('inf')
+    
+    # Apply y-axis filter
+    if y_log:
+        y_min = 10 ** y0 if y0 is not None else 0
+        y_max = 10 ** y1 if y1 is not None else float('inf')
+    else:
+        y_min = y0 if y0 is not None else 0
+        y_max = y1 if y1 is not None else float('inf')
+    
+    # Apply range filters
+    zoom_dff = zoom_dff[
+        (zoom_dff[x_axis] >= x_min) & (zoom_dff[x_axis] <= x_max) &
+        (zoom_dff[y_axis] >= y_min) & (zoom_dff[y_axis] <= y_max)
     ]
 
     zoom_ids = zoom_dff["title_y"].tolist()
@@ -731,7 +765,7 @@ def update_icicle(year_range, color_by, current_filter):
     else:
         agg_df = df_hier.groupby(['ids', 'labels', 'parents']).agg({
             'roi': 'mean',
-            'profit': 'mean',
+            'profit': 'mean', 
             'vote_average': 'mean'
         }).reset_index()
 
