@@ -368,7 +368,7 @@ app.layout = html.Div([
                     html.Button('Predict Success', id='predict-button', n_clicks=0,
                                 style={'background-color': '#4CAF50', 'color': 'white',
                                        'width': '100%', 'padding': '10px'})
-                ], style={"width": "50%", "paddingRight": "10px"}),
+                ], style={"width": "35%", "paddingRight": "10px"}),
 
 # Outputs (50% width)
 html.Div([
@@ -439,7 +439,7 @@ html.Div([
         })
     ])
 ], style={
-    'width': '50%',
+    'width': '65%',
     'paddingLeft': '10px',
     'boxSizing': 'border-box'
 })
