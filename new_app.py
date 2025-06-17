@@ -33,6 +33,44 @@ df["profit_margin"] = (df["profit"] / df["budget"]).replace([np.inf, -np.inf], n
 df["roi"] = df["profit_margin"] * 100
 df["primary_genre"] = df["genres_y"].str.split("-").str[0]
 
+#helper better graph
+def prettify_figure(fig, x_axis=None, y_axis=None, title=None):
+    fig.update_layout(
+        font=dict(family="Arial", size=14),
+        plot_bgcolor="white",
+        paper_bgcolor="white",
+        margin=dict(l=40, r=40, t=60, b=40),
+        xaxis=dict(
+            title=x_axis.replace("_", " ").title() if x_axis else '',
+            showgrid=True,
+            gridcolor="lightgrey",
+            zeroline=False
+        ),
+        yaxis=dict(
+            title=y_axis.replace("_", " ").title() if y_axis else '',
+            showgrid=True,
+            gridcolor="lightgrey",
+            zeroline=False
+        ),
+        hovermode="closest",
+        title=dict(
+            text=f"<b>{title}</b>" if title else '',
+            x=0.5,
+            xanchor="center",
+            font=dict(size=20)
+        )
+    )
+
+    fig.update_traces(
+        marker=dict(
+            line=dict(width=1, color='DarkSlateGrey'),
+            opacity=0.8,
+            sizemode='area'
+        )
+    )
+
+    return fig
+
 #tags preparation
 all_tags = df['tag'].dropna().str.split(';').explode().str.strip().str.lower()
 # Count the occurrences of each tag
@@ -136,76 +174,40 @@ app.title = "Movie Success Studio"
 app.layout = html.Div([
     dcc.Store(id="current-filter", data={"genres": None, "scatter_ids": None, "zoom_ids": None}),
     dcc.Store(id="prediction-store", data=None),
-    # Left Column
+
+    # ==== TOP SECTION ====
     html.Div([
-        html.Label("Color by:"),
-        dcc.Dropdown(
-            id="genre-color-by",
-            options=[
-                {"label": "Count", "value": "count"},
-                {"label": "ROI", "value": "roi"},
-                {"label": "Vote Average", "value": "vote_average"}
-            ],
-            value="count",
-            style={"margin-bottom": "10px"}
-        ),
-        html.Label("Year Range:"),
-        dcc.RangeSlider(
-            id="shared-year-slider",
-            min=2000, max=2020, step=1, value=[2000, 2020],
-            marks={str(y): str(y) for y in range(2000, 2021, 5)},
-            tooltip={"always_visible": True},
-            allowCross=False
-        ),
-        # dcc.Graph(id="genre-sunburst", style={"height": "40vh", "width": "100%"}),
-        dcc.Graph(id="genre-icicle"),
-        html.H3("Movie Success Predictor", style={'marginTop': '20px', 'width': '100%'}),
-
+        # LEFT (20%)
         html.Div([
-            html.Label("Budget (in millions)"),
-            dcc.Input(id='budget-input', type='number', value=50, min=0.1, step=0.01,
-                      style={'width': '100%'})
-        ], style={'marginBottom': '10px'}),
-
-        html.Div([
-            html.Label("Runtime (minutes)"),
-            dcc.Input(id='runtime-input', type='number', value=120, min=60, max=240, step=1,
-                      style={'width': '100%'})
-        ], style={'marginBottom': '10px'}),
-
-        html.Div([
-            html.Label("Original Language"),
+            html.Label("Color by:"),
             dcc.Dropdown(
-                id='language-input',
-                options=[{'label': 'English', 'value': 1},
-                         {'label': 'Non-English', 'value': 0}],
-                value=1,
-                style={'width': '100%'}
-            )
-        ], style={'marginBottom': '10px'}),
+                id="genre-color-by",
+                options=[
+                    {"label": "Count", "value": "count"},
+                    {"label": "ROI", "value": "roi"},
+                    {"label": "Vote Average", "value": "vote_average"}
+                ],
+                value="count",
+                style={"margin-bottom": "10px"}
+            ),
+            html.Label("Year Range:"),
+            dcc.RangeSlider(
+                id="shared-year-slider",
+                min=2000, max=2020, step=1, value=[2000, 2020],
+                marks={str(y): str(y) for y in range(2000, 2021, 5)},
+                tooltip={"always_visible": True},
+                allowCross=False,
+            ),
+            dcc.Graph(id="genre-icicle", style={"height": "50vh", "width": "100%"})
+        ], style={"width": "20%", "padding": "10px", "display": "inline-block", "verticalAlign": "top"}),
 
-
-        html.Div([
-            html.Label("Genres"),
-            dcc.Dropdown(
-                id='genres-input',
-                options=[{'label': genre, 'value': genre} for genre in all_genres],
-                multi=True,
-                value=['Action'],
-                style={'width': '100%'}
-            )
-        ], style={'marginBottom': '10px'}),
-
-        html.Button('Predict Success', id='predict-button', n_clicks=0,
-                    style={'background-color': '#4CAF50', 'color': 'white', 'width': '100%',
-                           'padding': '10px'})
-    ], style={"width": "20%", "display": "inline-block", "verticalAlign": "top", "padding": "10px"}),
-
-    # Right Column (80%)
+    # RIGHT (80%)
     html.Div([
+        # Scatterplot controls with labels above
         html.Div([
+            # Color by dropdown with label above
             html.Div([
-                html.Label("Color by:"),
+                html.Label("Color by:", style={"margin-bottom": "5px"}),
                 dcc.Dropdown(
                     id="color-by",
                     options=[
@@ -216,12 +218,13 @@ app.layout = html.Div([
                         {"label": "Profit", "value": "profit"}
                     ],
                     value="vote_average",
-                    style={"width": "200px", "marginRight": "10px"}
+                    style={"width": "200px", "marginRight": "20px"}
                 )
-            ], style={"display": "inline-block", "verticalAlign": "top"}),
-
+            ], style={"display": "inline-block", "marginRight": "20px"}),
+            
+            # X-axis dropdown with label above
             html.Div([
-                html.Label("X-axis:"),
+                html.Label("X-axis:", style={"margin-bottom": "5px"}),
                 dcc.Dropdown(
                     id="x-axis-dropdown",
                     options=[
@@ -233,12 +236,13 @@ app.layout = html.Div([
                         {"label": "Runtime", "value": "runtime"}
                     ],
                     value="budget",
-                    style={"width": "200px"}
+                    style={"width": "200px", "marginRight": "20px"}
                 )
-            ], style={"display": "inline-block", "verticalAlign": "top", "marginLeft": "20px"}),
-
+            ], style={"display": "inline-block", "marginRight": "20px"}),
+            
+            # Y-axis dropdown with label above
             html.Div([
-                html.Label("Y-axis:"),
+                html.Label("Y-axis:", style={"margin-bottom": "5px"}),
                 dcc.Dropdown(
                     id="y-axis-dropdown",
                     options=[
@@ -250,49 +254,135 @@ app.layout = html.Div([
                         {"label": "Runtime", "value": "runtime"}
                     ],
                     value="revenue",
-                    style={"width": "200px", "marginLeft": "20px"}
+                    style={"width": "200px"}
                 )
-            ], style={"display": "inline-block", "verticalAlign": "top", "marginLeft": "20px"})
-        ], style={"margin-bottom": "10px"}),
-        dcc.Store(id="cluster-count-store", data=5),
-        dcc.Graph(id="scatter-plot", style={"height": "50vh", "width": "100%"}),
+            ], style={"display": "inline-block"})
+        ], style={"margin-bottom": "15px"}),
 
-        # Results Section Split 1:3
+        dcc.Graph(id="scatter-plot", style={"height": "60vh", "width": "100%"})
+    ], style={"width": "80%", "padding": "10px", "display": "inline-block", "verticalAlign": "top"})
+    ], style={"display": "flex", "height": "60vh"}),
+
+    # ==== BOTTOM SECTION ====
+    html.Div([
+        # LEFT SIDE (40%)
         html.Div([
-            # Recommendations (1 part)
+            html.H3("Movie Success Predictor"),
             html.Div([
-                html.Div(id='success-output', style={
-                    'fontSize': '16px', 'padding': '10px', 'marginBottom': '8px',
-                    'backgroundColor': '#f8f9fa', 'borderRadius': '5px'
-                }),
-                html.Div(id='rating-output', style={
-                    'fontSize': '16px', 'padding': '10px', 'marginBottom': '8px',
-                    'backgroundColor': '#f8f9fa', 'borderRadius': '5px'
-                }),
-                html.Div(id='revenue-output', style={
-                    'fontSize': '16px', 'padding': '10px', 'marginBottom': '8px',
-                    'backgroundColor': '#f8f9fa', 'borderRadius': '5px'
-                }),
-                html.Div(id='roi-output', style={
-                    'fontSize': '16px', 'padding': '10px', 'marginBottom': '8px',
-                    'backgroundColor': '#f8f9fa', 'borderRadius': '5px'
-                }),
-                html.H4("Recommendations for Improvement", style={'marginTop': '20px'}),
-                html.Div(id='recommendations', style={
-                    'padding': '10px',
-                    'backgroundColor': '#e9ecef',
-                    'borderRadius': '5px'
-                })
-            ], style={'flex': 1, 'padding': '10px'}),
+                # Inputs (50% width)
+                html.Div([
+                    html.Label("Budget (in millions)"),
+                    dcc.Input(id='budget-input', type='number', value=50, min=0.1, step=0.01,
+                              style={'width': '100%', 'marginBottom': '10px'}),
 
-            # Sensitivity Plot (3 parts)
-            html.Div([
-                dcc.Graph(id='sensitivity-plot', style={'height': '100%', 'width': '100%'})
-            ], style={'flex': 3, 'padding': '10px'})
-        ], style={'display': 'flex', 'marginTop': '20px', 'border': '1px solid #ddd', 'borderRadius': '5px'})
-    ], style={"width": "80%", "display": "inline-block", "verticalAlign": "top", "padding": "10px"})
-], style={"display": "flex"})
+                    html.Label("Runtime (minutes)"),
+                    dcc.Input(id='runtime-input', type='number', value=120, min=60, max=240, step=1,
+                              style={'width': '100%', 'marginBottom': '10px'}),
 
+                    html.Label("Original Language"),
+                    dcc.Dropdown(
+                        id='language-input',
+                        options=[{'label': 'English', 'value': 1}, {'label': 'Non-English', 'value': 0}],
+                        value=1,
+                        style={'width': '100%', 'marginBottom': '10px'}
+                    ),
+
+                    html.Label("Genres"),
+                    dcc.Dropdown(
+                        id='genres-input',
+                        options=[{'label': genre, 'value': genre} for genre in all_genres],
+                        multi=True,
+                        value=['Action'],
+                        style={'width': '100%', 'marginBottom': '10px'}
+                    ),
+
+                    html.Button('Predict Success', id='predict-button', n_clicks=0,
+                                style={'background-color': '#4CAF50', 'color': 'white',
+                                       'width': '100%', 'padding': '10px'})
+                ], style={"width": "50%", "paddingRight": "10px"}),
+
+# Outputs (50% width)
+html.Div([
+    # First row container
+    html.Div([
+        # Success Probability
+        html.Div([
+            html.Div("Success Probability:", style={'fontWeight': 'bold'}),
+            html.Div(id='success-output', style={
+                'fontSize': '14px',
+                'padding': '8px',
+                'backgroundColor': '#f8f9fa',
+                'borderRadius': '5px',
+                'marginTop': '5px'
+            })
+        ], style={'width': '48%', 'display': 'inline-block', 'marginRight': '4%'}),
+        
+        # Rating
+        html.Div([
+            html.Div("Rating:", style={'fontWeight': 'bold'}),
+            html.Div(id='rating-output', style={
+                'fontSize': '14px',
+                'padding': '8px',
+                'backgroundColor': '#f8f9fa',
+                'borderRadius': '5px',
+                'marginTop': '5px'
+            })
+        ], style={'width': '48%', 'display': 'inline-block'})
+    ], style={'marginBottom': '15px'}),
+    
+    # Second row container
+    html.Div([
+        # Revenue
+        html.Div([
+            html.Div("Revenue:", style={'fontWeight': 'bold'}),
+            html.Div(id='revenue-output', style={
+                'fontSize': '14px',
+                'padding': '8px',
+                'backgroundColor': '#f8f9fa',
+                'borderRadius': '5px',
+                'marginTop': '5px'
+            })
+        ], style={'width': '48%', 'display': 'inline-block', 'marginRight': '4%'}),
+        
+        # ROI
+        html.Div([
+            html.Div("ROI:", style={'fontWeight': 'bold'}),
+            html.Div(id='roi-output', style={
+                'fontSize': '14px',
+                'padding': '8px',
+                'backgroundColor': '#f8f9fa',
+                'borderRadius': '5px',
+                'marginTop': '5px'
+            })
+        ], style={'width': '48%', 'display': 'inline-block'})
+    ], style={'marginBottom': '15px'}),
+    
+    # Recommendations section
+    html.Div([
+        html.Div("Recommendations for Improvement", 
+                style={'fontWeight': 'bold', 'marginBottom': '5px'}),
+        html.Div(id='recommendations', style={
+            'padding': '10px',
+            'backgroundColor': '#e9ecef',
+            'borderRadius': '5px',
+            'minHeight': '80px',
+            'overflowY': 'auto'
+        })
+    ])
+], style={
+    'width': '50%',
+    'paddingLeft': '10px',
+    'boxSizing': 'border-box'
+})
+            ], style={"display": "flex"}),
+        ], style={"width": "40%", "padding": "10px", "display": "inline-block", "verticalAlign": "top", "height": "100%"}),
+
+        # RIGHT SIDE (60%) - Sensitivity Plot
+        html.Div([
+            dcc.Graph(id='sensitivity-plot', style={'height': '100%', 'width': '100%'})
+        ], style={"width": "60%", "padding": "10px", "display": "inline-block", "verticalAlign": "top", "height": "100%"})
+    ], style={"display": "flex", "height": "40vh"})
+])
 
 
 
@@ -474,7 +564,7 @@ def update_scatter(year_range, color_by, x_axis, y_axis,current_filter, predicti
         upper = dff[color_by].quantile(0.95)
         dff["color_clip"] = dff[color_by].clip(lower, upper)
         color_by_plot = "color_clip"
-    elif color_by == "runtime":
+    elif color_by in ["runtime", "profit"]: 
         lower = dff[color_by].quantile(0.01)
         upper = dff[color_by].quantile(0.99)
         dff["color_clip"] = dff[color_by].clip(lower, upper)
@@ -553,6 +643,13 @@ def update_scatter(year_range, color_by, x_axis, y_axis,current_filter, predicti
             if r0 is not None and r1 is not None:
                 fig.update_layout(**{axis: dict(range=[r0, r1])})
 
+
+    fig = prettify_figure(
+        fig,
+        x_axis=x_axis,
+        y_axis=y_axis,
+        title=f"{x_axis.replace('_', ' ').title()} vs {y_axis.replace('_', ' ').title()} ({year_range[0]}–{year_range[1]})"
+    )
     return fig
 
 @app.callback(
@@ -843,6 +940,8 @@ def update_icicle(year_range, color_by, current_filter):
 #     pathbar_visible=True,  # Explicitly show/hide the path bar
 #     pathbar_thickness=20   # Control thickness
 # )
+
+
     return fig
 
 
@@ -936,7 +1035,21 @@ def update_predictions(n_clicks, budget, runtime, language, genres):
     
     # Create sensitivity plot
     fig = create_sensitivity_plot(budget, runtime, language, year, genres)
-    
+    fig.update_layout(
+        title = None,
+        yaxis=dict(
+            showticklabels=False,
+            title=None
+        ),
+        yaxis2=dict(
+            showticklabels=False,
+            title=None
+        ),
+        yaxis3=dict(
+            showticklabels=False,
+            title=None
+        )
+    )
     # Format outputs
     success_output = f"🎬 Success Probability: {success_prob:.1%}"
     rating_output = f"⭐ Predicted Rating: {rating_pred:.1f}/10"
