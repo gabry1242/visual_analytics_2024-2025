@@ -198,7 +198,7 @@ app.layout = html.Div([
                 tooltip={"always_visible": True},
                 allowCross=False,
             ),
-            dcc.Graph(id="genre-icicle", style={"height": "50vh", "width": "100%"})
+            dcc.Graph(id="genre-icicle", style={"height": "80%", "width": "100%"})
         ], style={"width": "20%", "padding": "10px", "display": "inline-block", "verticalAlign": "top"}),
 
     # RIGHT (80%)
@@ -259,9 +259,9 @@ app.layout = html.Div([
             ], style={"display": "inline-block"})
         ], style={"margin-bottom": "15px"}),
 
-        dcc.Graph(id="scatter-plot", style={"height": "60vh", "width": "100%"})
+        dcc.Graph(id="scatter-plot", style={"height": "100%", "width": "100%"})
     ], style={"width": "80%", "padding": "10px", "display": "inline-block", "verticalAlign": "top"})
-    ], style={"display": "flex", "height": "60vh"}),
+    ], style={"display": "flex", "height": "55vh"}),
 
     # ==== BOTTOM SECTION ====
     html.Div([
@@ -381,7 +381,7 @@ html.Div([
         html.Div([
             dcc.Graph(id='sensitivity-plot', style={'height': '100%', 'width': '100%'})
         ], style={"width": "60%", "padding": "10px", "display": "inline-block", "verticalAlign": "top", "height": "100%"})
-    ], style={"display": "flex", "height": "40vh"})
+    ], style={"display": "flex", "height": "45vh"})
 ])
 
 
