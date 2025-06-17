@@ -71,6 +71,75 @@ def prettify_figure(fig, x_axis=None, y_axis=None, title=None):
 
     return fig
 
+
+def prettify_sensitivity_figure(fig, title=None):
+    fig.update_layout(
+        font=dict(family="Arial", size=14),
+        plot_bgcolor="white",
+        paper_bgcolor="white",
+        margin=dict(l=80, r=80, t=80, b=60),  # More margin for multiple y-axes
+        title=dict(
+            text=f"<b>{title}</b>" if title else '',
+            x=0.5,
+            xanchor="center",
+            font=dict(size=20)
+        ),
+        hovermode="x unified",
+        legend=dict(
+            orientation="h",
+            yanchor="bottom",
+            y=1.02,
+            xanchor="right",
+            x=1,
+            bgcolor="rgba(255,255,255,0.8)"
+        ),
+        xaxis=dict(
+            showgrid=True,
+            gridcolor="lightgrey",
+            zeroline=False,
+            mirror=True,
+            showline=True,
+            linecolor='black'
+        ),
+        yaxis=dict(
+            showgrid=True,
+            gridcolor="lightgrey",
+            zeroline=False,
+            mirror=True,
+            showline=True,
+            linecolor='blue'  # Match trace color
+        ),
+        yaxis2=dict(
+            showgrid=False,  # Avoid double grid lines
+            zeroline=False,
+            mirror=True,
+            showline=True,
+            linecolor='green'  # Match trace color
+        ),
+        yaxis3=dict(
+            showgrid=False,
+            zeroline=False,
+            mirror=True,
+            showline=True,
+            linecolor='red'  # Match trace color
+        )
+    )
+
+    # Update traces for consistent styling
+    fig.update_traces(
+        line=dict(width=3),
+        marker=dict(size=8),
+        hovertemplate="%{y:.2f}<extra></extra>"  # Clean hover format
+    )
+    
+    # Add axis title styling
+    fig.update_yaxes(title_standoff=15)
+    fig.update_xaxes(title_standoff=15)
+    
+    return fig
+
+
+
 #tags preparation
 all_tags = df['tag'].dropna().str.split(';').explode().str.strip().str.lower()
 # Count the occurrences of each tag
@@ -171,7 +240,7 @@ app = dash.Dash(__name__, suppress_callback_exceptions=True)
 
 app.title = "Movie Success Studio"
 
-app.layout = html.Div([
+app.layout = html.Div([ 
     dcc.Store(id="current-filter", data={"genres": None, "scatter_ids": None, "zoom_ids": None}),
     dcc.Store(id="prediction-store", data=None),
 
@@ -259,7 +328,7 @@ app.layout = html.Div([
             ], style={"display": "inline-block"})
         ], style={"margin-bottom": "15px"}),
 
-        dcc.Graph(id="scatter-plot", style={"height": "48vh", "width": "100%"})
+        dcc.Graph(id="scatter-plot", style={"height": "47vh", "width": "100%"})
     ], style={"width": "80%", "padding": "10px", "display": "inline-block", "verticalAlign": "top"})
     ], style={"display": "flex", "height": "55vh"}),
 
@@ -382,7 +451,9 @@ html.Div([
             dcc.Graph(id='sensitivity-plot', style={'height': '100%', 'width': '100%'})
         ], style={"width": "60%", "padding": "10px", "display": "inline-block", "verticalAlign": "top", "height": "100%"})
     ], style={"display": "flex", "height": "45vh"})
-])
+], style={
+    "fontFamily": 'Arial'  # prettier font
+})
 
 
 
@@ -614,7 +685,8 @@ def update_scatter(year_range, color_by, x_axis, y_axis,current_filter, predicti
                 y=[prediction_data[pred_y_key]],
                 mode='markers',
                 marker=dict(
-                    color='red',
+                    symbol='diamond',
+                    color='lime',
                     size=15,
                     line=dict(width=3, color='black')
                 ),
@@ -939,6 +1011,7 @@ def update_icicle(year_range, color_by, current_filter):
 #     pathbar_visible=True,  # Explicitly show/hide the path bar
 #     pathbar_thickness=20   # Control thickness
 # )
+    fig.update_layout(coloraxis_showscale=False)
 
 
     return fig
@@ -1168,31 +1241,38 @@ def create_sensitivity_plot(budget, runtime, language, year, genres):
         x=budget_range, y=ratings,
         name='Predicted Rating',
         yaxis='y1',
-        line=dict(color='blue'))
-    )
+        line=dict(color='blue', width=3),
+        hovertemplate="Rating: %{y:.2f}<extra></extra>"
+    ))
     
     fig.add_trace(go.Scatter(
         x=budget_range, y=revenues,
         name='Predicted Revenue (million $)',
         yaxis='y2',
-        line=dict(color='green'))
-    )
+        line=dict(color='green', width=3),
+        hovertemplate="Revenue: %{y:.2f}M<extra></extra>"
+    ))
     
     fig.add_trace(go.Scatter(
         x=budget_range, y=success_probs,
         name='Success Probability (%)',
         yaxis='y3',
-        line=dict(color='red'))
+        line=dict(color='red', width=3),
+        hovertemplate="Success: %{y:.2f}%<extra></extra>"
+    ))
+    
+    # Apply the prettify function
+    fig = prettify_sensitivity_figure(
+        fig,
+        title='Sensitivity to Budget Changes'
     )
     
+    # Custom axis settings after prettify
     fig.update_layout(
-        title='Sensitivity to Budget Changes',
         xaxis_title='Budget (million $)',
         yaxis=dict(title='Rating (1-10)', color='blue'),
         yaxis2=dict(title='Revenue (million $)', color='green', overlaying='y', side='right'),
-        yaxis3=dict(title='Success Probability (%)', color='red', overlaying='y', side='left', position=0.15),
-        hovermode='x unified',
-        legend=dict(orientation='h', yanchor='bottom', y=1.02, xanchor='right', x=1)
+        yaxis3=dict(title='Success Probability (%)', color='red', overlaying='y', side='left')
     )
     
     return fig
