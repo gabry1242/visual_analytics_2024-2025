@@ -259,7 +259,7 @@ app.layout = html.Div([
             ], style={"display": "inline-block"})
         ], style={"margin-bottom": "15px"}),
 
-        dcc.Graph(id="scatter-plot", style={"height": "48vh", "width": "100%"})
+        dcc.Graph(id="scatter-plot", style={"height": "47vh", "width": "100%"})
     ], style={"width": "80%", "padding": "10px", "display": "inline-block", "verticalAlign": "top"})
     ], style={"display": "flex", "height": "55vh"}),
 
