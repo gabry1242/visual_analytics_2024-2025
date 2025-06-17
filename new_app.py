@@ -198,7 +198,7 @@ app.layout = html.Div([
                 tooltip={"always_visible": True},
                 allowCross=False,
             ),
-            dcc.Graph(id="genre-icicle", style={"height": "80%", "width": "100%"})
+            dcc.Graph(id="genre-icicle", style={"height": "40vh", "width": "100%"})
         ], style={"width": "20%", "padding": "10px", "display": "inline-block", "verticalAlign": "top"}),
 
     # RIGHT (80%)
@@ -259,7 +259,7 @@ app.layout = html.Div([
             ], style={"display": "inline-block"})
         ], style={"margin-bottom": "15px"}),
 
-        dcc.Graph(id="scatter-plot", style={"height": "100%", "width": "100%"})
+        dcc.Graph(id="scatter-plot", style={"height": "48vh", "width": "100%"})
     ], style={"width": "80%", "padding": "10px", "display": "inline-block", "verticalAlign": "top"})
     ], style={"display": "flex", "height": "55vh"}),
 
@@ -647,8 +647,7 @@ def update_scatter(year_range, color_by, x_axis, y_axis,current_filter, predicti
     fig = prettify_figure(
         fig,
         x_axis=x_axis,
-        y_axis=y_axis,
-        title=f"{x_axis.replace('_', ' ').title()} vs {y_axis.replace('_', ' ').title()} ({year_range[0]}–{year_range[1]})"
+        y_axis=y_axis
     )
     return fig
 
