@@ -454,7 +454,7 @@ html.Div([
 
         # RIGHT SIDE (60%) - Sensitivity Plot
         html.Div([
-            dcc.Graph(id='sensitivity-plot', style={'height': '100%', 'width': '100%'})
+            dcc.Graph(id='sensitivity-plot', style={'height': '40vh', 'width': '100%'})
         ], style={"width": "60%", "padding": "10px", "display": "inline-block", "verticalAlign": "top", "height": "100%"})
     ], style={"display": "flex", "height": "45vh"})
 ], style={
