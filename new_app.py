@@ -36,7 +36,7 @@ df["primary_genre"] = df["genres_y"].str.split("-").str[0]
 #helper better graph
 def prettify_figure(fig, x_axis=None, y_axis=None, title=None):
     fig.update_layout(
-        font=dict(family="Arial", size=14),
+        font=dict(family='Sans-serif', size=14),
         plot_bgcolor="white",
         paper_bgcolor="white",
         margin=dict(l=40, r=40, t=60, b=40),
@@ -74,7 +74,7 @@ def prettify_figure(fig, x_axis=None, y_axis=None, title=None):
 
 def prettify_sensitivity_figure(fig, title=None):
     fig.update_layout(
-        font=dict(family="Arial", size=14),
+        font=dict(family='Sans-serif', size=14),
         plot_bgcolor="white",
         paper_bgcolor="white",
         margin=dict(l=80, r=80, t=80, b=60),  # More margin for multiple y-axes
@@ -368,7 +368,7 @@ app.layout = html.Div([
                     html.Button('Predict Success', id='predict-button', n_clicks=0,
                                 style={'background-color': '#4CAF50', 'color': 'white',
                                        'width': '100%', 'padding': '10px'})
-                ], style={"width": "50%", "paddingRight": "10px"}),
+                ], style={"width": "35%", "paddingRight": "10px"}),
 
 # Outputs (50% width)
 html.Div([
@@ -380,7 +380,8 @@ html.Div([
             html.Div(id='success-output', style={
                 'fontSize': '14px',
                 'padding': '8px',
-                'backgroundColor': '#f8f9fa',
+                'backgroundColor': '#ffffff',
+                'color': '#333333',
                 'borderRadius': '5px',
                 'marginTop': '5px'
             })
@@ -392,7 +393,8 @@ html.Div([
             html.Div(id='rating-output', style={
                 'fontSize': '14px',
                 'padding': '8px',
-                'backgroundColor': '#f8f9fa',
+                'backgroundColor': '#ffffff',
+                'color': '#333333',
                 'borderRadius': '5px',
                 'marginTop': '5px'
             })
@@ -407,7 +409,8 @@ html.Div([
             html.Div(id='revenue-output', style={
                 'fontSize': '14px',
                 'padding': '8px',
-                'backgroundColor': '#f8f9fa',
+                'backgroundColor': '#ffffff',
+                'color': '#333333',
                 'borderRadius': '5px',
                 'marginTop': '5px'
             })
@@ -419,7 +422,8 @@ html.Div([
             html.Div(id='roi-output', style={
                 'fontSize': '14px',
                 'padding': '8px',
-                'backgroundColor': '#f8f9fa',
+                'backgroundColor': '#ffffff',
+                'color': '#333333',
                 'borderRadius': '5px',
                 'marginTop': '5px'
             })
@@ -432,14 +436,16 @@ html.Div([
                 style={'fontWeight': 'bold', 'marginBottom': '5px'}),
         html.Div(id='recommendations', style={
             'padding': '10px',
-            'backgroundColor': '#e9ecef',
+            'backgroundColor': '#ffffff',
             'borderRadius': '5px',
             'minHeight': '80px',
-            'overflowY': 'auto'
+            'overflowY': 'auto',
+            'border': '1px solid #e0e0e0',  # Light gray border
+            'boxShadow': '0 2px 4px rgba(0,0,0,0.05)'  # Subtle shadow
         })
     ])
 ], style={
-    'width': '50%',
+    'width': '65%',
     'paddingLeft': '10px',
     'boxSizing': 'border-box'
 })
@@ -448,11 +454,18 @@ html.Div([
 
         # RIGHT SIDE (60%) - Sensitivity Plot
         html.Div([
-            dcc.Graph(id='sensitivity-plot', style={'height': '100%', 'width': '100%'})
+            dcc.Graph(id='sensitivity-plot', style={'height': '40vh', 'width': '100%'})
         ], style={"width": "60%", "padding": "10px", "display": "inline-block", "verticalAlign": "top", "height": "100%"})
     ], style={"display": "flex", "height": "45vh"})
 ], style={
-    "fontFamily": 'Arial'  # prettier font
+    'backgroundColor': '#f5f5f5',  # Very light gray
+    'color': '#333333',            # Dark gray text
+    "fontFamily": 'Sans-serif', # prettier font
+    'margin': '0',          # Remove outer margin
+    'padding': '0',         # Remove outer padding
+    'height': '100vh',      # Full viewport height
+    'width': '100vw',       # Full viewport width
+
 })
 
 
@@ -720,6 +733,13 @@ def update_scatter(year_range, color_by, x_axis, y_axis,current_filter, predicti
         fig,
         x_axis=x_axis,
         y_axis=y_axis
+    )
+    fig.update_layout(
+        plot_bgcolor='#f5f5f5',
+        paper_bgcolor='#f5f5f5',
+        font=dict(color='#333333', family='Sans-serif'),
+
+
     )
     return fig
 
@@ -1013,7 +1033,13 @@ def update_icicle(year_range, color_by, current_filter):
 # )
     fig.update_layout(coloraxis_showscale=False)
 
+    fig.update_layout(
+        plot_bgcolor='#ffffff',
+        paper_bgcolor='#f5f5f5',
+        font=dict(color='#333333', family='Sans-serif'),
 
+
+    )
     return fig
 
 
@@ -1274,7 +1300,19 @@ def create_sensitivity_plot(budget, runtime, language, year, genres):
         yaxis2=dict(title='Revenue (million $)', color='green', overlaying='y', side='right'),
         yaxis3=dict(title='Success Probability (%)', color='red', overlaying='y', side='left')
     )
-    
+    fig.update_layout(
+        plot_bgcolor='#f5f5f5',
+        paper_bgcolor='#f5f5f5',
+        font=dict(color='#333333', family='Sans-serif'),
+        legend=dict(
+            bgcolor='#f5f5f5',  # Set legend background color
+            bordercolor="#000000",  # Optional: border color
+            borderwidth=1,  # Optional: border width
+            font=dict(
+                color='#333333'  # Optional: change legend text color if needed
+            )
+        )
+    )
     return fig
 
 
