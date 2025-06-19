@@ -58,3 +58,17 @@ The app uses Dash and Plotly for:
 - `new_app.py` → Main Dash application code
 - `README.md` → Project overview and documentation
 - `requirements.txt` → Python dependencies 
+
+---
+
+## ⚙️ Installation
+
+- Clone this repository
+    >git clone https://github.com/gabry1242/visual_analytics_2024-2025
+
+- Install dependencies:
+    >pip install -r requirements.txt
+
+- Run the app
+    >python new_app.py
+    >Then open http://127.0.0.1:8050 in your browser
