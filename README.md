@@ -1,25 +1,25 @@
-# 🎬 Movie Success Studio
+# 🎬 Film Predict-R
 
-Movie Success Studio is a data-driven web application that empowers users to explore historical movie data, analyze trends, and simulate success predictions for hypothetical or planned film projects. The application is built using Python's Dash framework and integrates machine learning models to provide actionable recommendations.
+Film Predict-R is a data-driven web application that empowers users to explore historical movie data, analyze trends, and simulate success predictions for hypothetical or planned film projects. The application is built using Python's Dash framework and integrates machine learning models to provide actionable recommendations.
 
-## 🚀 Overview
+## 🎥 Overview
 
 This project uses real-world movie data to:
 
 - Visualize the relationship between key movie attributes (budget, genre, ROI, rating).
 - Predict the success probability, expected revenue, and average rating for a movie.
 - Recommend how to improve a movie’s potential success based on adjustable inputs.
-- Enable genre-based navigation using an interactive hierarchical genre explorer.
+- Enable genre-based navigation to see how the predicted value compare to other films.
 
 ---
 
-## 🧠 How It Works
+## 💻 How It Works
 
 ### 1. **Data Preprocessing**
-- The dataset (`merged_with_tags.csv`) is cleaned to remove missing or duplicate entries.
-- New features like `profit`, `ROI`, and `success` (a Boolean metric) are computed.
+- The dataset original dataset is cleaned to remove missing or duplicate entries.
+- The data are then augmented by adding revenue and budget coming from a IMDB dataset.
+- New features like `profit`, `ROI`, and `success` are computed.
 - Genre data is split and transformed to support both visual and machine learning needs.
-- Tags and genres are normalized and aggregated for insights.
 
 ### 2. **Feature Engineering**
 - Genres are one-hot encoded using `MultiLabelBinarizer`.
@@ -30,7 +30,7 @@ This project uses real-world movie data to:
 Three models are trained using `scikit-learn`:
 - 🎯 `RandomForestClassifier`: predicts if a movie will be successful.
 - ⭐ `RandomForestRegressor`: predicts the average user rating.
-- 💰 `RandomForestRegressor`: predicts revenue (log-transformed).
+- 💰 `RandomForestRegressor`: predicts average revenue (log-transformed).
 
 All models are trained on a training split and evaluated on held-out test data.
 
