@@ -66,6 +66,10 @@ The app uses Dash and Plotly for:
 - Clone this repository
     >git clone https://github.com/gabry1242/visual_analytics_2024-2025
 
+- (Optional) Create a virtual environment
+    >On macOS/Linux: python -m venv venv 
+    >On Windows: venv\Scripts\activate 
+    
 - Install dependencies:
     >pip install -r requirements.txt
 
