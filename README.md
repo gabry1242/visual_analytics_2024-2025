@@ -54,7 +54,7 @@ The app uses Dash and Plotly for:
 ---
 
 ## 📁 Project Structure
-├── cleaned_output.csv # Main input dataset
-├── new_app.py # Main Dash application code 
-├── README.md # Project overview and documentation
-└── requirements.txt # Python dependencies 
+- `cleaned_output.csv` → Main input dataset 
+- `new_app.py` → Main Dash application code
+- `README.md` → Project overview and documentation
+- `requirements.txt` → Python dependencies 
