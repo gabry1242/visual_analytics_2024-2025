@@ -54,8 +54,8 @@ The app uses Dash and Plotly for:
 ---
 
 ## 📁 Project Structure
-- `cleaned_output.csv` → Main input dataset 
-- `new_app.py` → Main Dash application code
+- `merged_with_tags.csv` → Main input dataset 
+- `app.py` → Main Dash application code
 - `README.md` → Project overview and documentation
 - `requirements.txt` → Python dependencies 
 
@@ -70,5 +70,5 @@ The app uses Dash and Plotly for:
     >pip install -r requirements.txt
 
 - Run the app
-    >python new_app.py
+    >python app.py
     >Then open http://127.0.0.1:8050 in your browser
