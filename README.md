@@ -69,10 +69,42 @@ The app uses Dash and Plotly for:
 - (Optional) Create a virtual environment
     >On macOS/Linux: python -m venv venv 
     >On Windows: venv\Scripts\activate 
-    
+
 - Install dependencies:
     >pip install -r requirements.txt
 
 - Run the app
     >python app.py
     >Then open http://127.0.0.1:8050 in your browser
+
+
+## 📦 Libraries Used
+- `dash`, `Seaborn`, `plotly`
+- `pandas`, `numpy`, `scikit-learn`, 
+
+
+## 📌 Contribution 
+
+### Implemented by us:
+- Cleaned and processed a real-world movie dataset (budgets, revenues, genres, tags)
+- Engineered new features such as ROI, profit, and binary success labels
+- Built a multi-model ML pipeline:
+    > Success classification with RandomForestClassifier
+    > Rating prediction with RandomForestRegressor
+    > Revenue prediction with log-scaled regression
+- Constructed a genre hierarchy visualization using icicle plots
+- Designed interactive Dash layout with:
+    > Year range sliders
+    > Dynamic dropdowns for feature selection
+    > Zoom & selection filters for scatter plots
+- Integrated real-time prediction engine with input controls
+- Created a custom recommendation engine based on sensitivity testing
+
+### Use of AI:
+- Helped structure and refactor the Dash app code for clarity and maintainability
+- Suggested best practices for layout modularization and callback organization
+- Enhanced comments, sectioning, and readability of the full codebase
+- Co-developed logic for:
+    > Dynamic genre filtering with fallback handling
+    > Consistent styling across plots and interface
+    > Reviewed code for consistency, unused imports, and simplified expressions
