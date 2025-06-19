@@ -4,7 +4,6 @@ import pandas as pd
 import plotly.express as px
 import numpy as np
 from sklearn.decomposition import PCA
-from sklearn.manifold import TSNE
 from sklearn.preprocessing import StandardScaler
 from sklearn.cluster import KMeans
 from sklearn.ensemble import RandomForestRegressor, RandomForestClassifier
@@ -20,21 +19,126 @@ from itertools import combinations
 import networkx as nx
 import seaborn as sns
 from collections import Counter
+from dash import callback_context
 from sklearn.preprocessing import MinMaxScaler
-import pickle
-import os
 
 # Load and prepare data
 df = pd.read_csv("merged_with_tags.csv")
 df = df.dropna(subset=["budget", "revenue", "release_year", "title_y", "vote_count", 'genres_y'])
 df = df.drop_duplicates(subset=['title_y'])
 df["release_year"] = df["release_year"].astype(int)
-
 # Extra metrics
 df["profit"] = df["revenue"] - df["budget"]
 df["profit_margin"] = (df["profit"] / df["budget"]).replace([np.inf, -np.inf], np.nan)
 df["roi"] = df["profit_margin"] * 100
 df["primary_genre"] = df["genres_y"].str.split("-").str[0]
+
+#helper better graph
+def prettify_figure(fig, x_axis=None, y_axis=None, title=None):
+    fig.update_layout(
+        font=dict(family='Sans-serif', size=14),
+        plot_bgcolor="white",
+        paper_bgcolor="white",
+        margin=dict(l=40, r=40, t=60, b=40),
+        xaxis=dict(
+            title=x_axis.replace("_", " ").title() if x_axis else '',
+            showgrid=True,
+            gridcolor="lightgrey",
+            zeroline=False
+        ),
+        yaxis=dict(
+            title=y_axis.replace("_", " ").title() if y_axis else '',
+            showgrid=True,
+            gridcolor="lightgrey",
+            zeroline=False
+        ),
+        hovermode="closest",
+        title=dict(
+            text=f"<b>{title}</b>" if title else '',
+            x=0.5,
+            xanchor="center",
+            font=dict(size=20)
+        )
+    )
+
+    fig.update_traces(
+        marker=dict(
+            line=dict(width=1, color='DarkSlateGrey'),
+            opacity=0.8,
+            sizemode='area'
+        )
+    )
+
+    return fig
+
+
+def prettify_sensitivity_figure(fig, title=None):
+    fig.update_layout(
+        font=dict(family='Sans-serif', size=14),
+        plot_bgcolor="white",
+        paper_bgcolor="white",
+        margin=dict(l=80, r=80, t=80, b=60),  # More margin for multiple y-axes
+        title=dict(
+            text=f"<b>{title}</b>" if title else '',
+            x=0.5,
+            xanchor="center",
+            font=dict(size=20)
+        ),
+        hovermode="x unified",
+        legend=dict(
+            orientation="h",
+            yanchor="bottom",
+            y=1.02,
+            xanchor="right",
+            x=1,
+            bgcolor="rgba(255,255,255,0.8)"
+        ),
+        xaxis=dict(
+            showgrid=True,
+            gridcolor="lightgrey",
+            zeroline=False,
+            mirror=True,
+            showline=True,
+            linecolor='black'
+        ),
+        yaxis=dict(
+            showgrid=True,
+            gridcolor="lightgrey",
+            zeroline=False,
+            mirror=True,
+            showline=True,
+            linecolor='blue'  # Match trace color
+        ),
+        yaxis2=dict(
+            showgrid=False,  # Avoid double grid lines
+            zeroline=False,
+            mirror=True,
+            showline=True,
+            linecolor='green'  # Match trace color
+        ),
+        yaxis3=dict(
+            showgrid=False,
+            zeroline=False,
+            mirror=True,
+            showline=True,
+            linecolor='red'  # Match trace color
+        )
+    )
+
+    # Update traces for consistent styling
+    fig.update_traces(
+        line=dict(width=3),
+        marker=dict(size=8),
+        hovertemplate="%{y:.2f}<extra></extra>"  # Clean hover format
+    )
+    
+    # Add axis title styling
+    fig.update_yaxes(title_standoff=15)
+    fig.update_xaxes(title_standoff=15)
+    
+    return fig
+
+
 
 #tags preparation
 all_tags = df['tag'].dropna().str.split(';').explode().str.strip().str.lower()
@@ -82,245 +186,7 @@ genre_counts, hierarchy_df = prepare_genre_data(df)
 numeric_features = ["budget", "revenue", "vote_average", "vote_count", "runtime", "profit", "roi"]
 
 
-##GRAPH CREATION AND DATA PREPARATION###
 
-def build_full_graph(network_data):
-    G = nx.Graph()
-    for node in network_data['nodes']:
-        G.add_node(node['id'], **node)
-    for link in network_data['links']:
-        G.add_edge(link['source'], link['target'], weight=link['value'])
-    return G
-
-# Get subgraph nodes connected to all selected tags (intersection of neighbors)
-def get_expanded_subgraph(G, selected_tags):
-    if not selected_tags:
-        # Return empty graph or full graph if you prefer
-        return nx.Graph()
-    
-    # Use union instead of intersection to expand from all selected tags
-    expanded_nodes = set(selected_tags)
-    for tag in selected_tags:
-        if tag in G:
-            expanded_nodes.update(G.neighbors(tag))
-    
-    return G.subgraph(expanded_nodes).copy()
-
-
-def prune_edges_to_hierarchy(G, pos):
-    import networkx as nx
-    from collections import defaultdict
-
-    layers = defaultdict(list)
-    for node, (x, y) in pos.items():
-        layers[x].append(node)
-
-    sorted_layers = sorted(layers.keys())
-
-    H = nx.Graph()
-    H.add_nodes_from(G.nodes(data=True))
-
-    for i, layer_x in enumerate(sorted_layers):
-        nodes_in_layer = layers[layer_x]
-
-        if i == 0:
-            # First layer, no incoming edges
-            continue
-
-        prev_layer_x = sorted_layers[i - 1]
-        nodes_in_prev_layer = layers[prev_layer_x]
-
-        for node in nodes_in_layer:
-            neighbors_in_prev = [nbr for nbr in G.neighbors(node) if nbr in nodes_in_prev_layer]
-
-            if not neighbors_in_prev:
-                continue
-
-            # Choose edge with highest weight
-            best_nbr = max(
-                neighbors_in_prev,
-                key=lambda nbr: G.edges[node, nbr].get('weight', 1)
-            )
-
-            H.add_edge(node, best_nbr, **G.edges[node, best_nbr])
-
-    return H
-# Create figure from subgraph and highlight selected tags
-def create_network_figure(G, selected_tags, color_metric):
-    if len(G) == 0:
-        fig = go.Figure()
-        fig.update_layout(
-            title="Select tag(s) to start",
-            xaxis=dict(visible=False),
-            yaxis=dict(visible=False)
-        )
-        return fig
-    def multi_level_hierarchical_layout(G, tag_path, level_distance=300, vertical_gap=50):
-        from collections import deque
-
-        pos = {}
-        level = 0
-        visited = set()
-        canvas_height = 700
-        # for i, current_tag in enumerate(tag_path):
-        #     if current_tag not in G:
-        #         continue
-        #     # Place the current tag
-        #     pos[current_tag] = (level * level_distance, 0)
-        #     visited.add(current_tag)
-            
-        #     # Expand to neighbors at next level
-        #     neighbors = [n for n in G.neighbors(current_tag) if n not in visited]
-        #     for j, neighbor in enumerate(sorted(neighbors)):
-        #         y_offset = j * vertical_gap - (len(neighbors) * vertical_gap / 2)
-        #         print(j, neighbor)
-        #         #y_offset = ((j + 0.5) / num_neighbors) * canvas_height - (canvas_height / 2)
-        #         pos[neighbor] = ((len(tag_path) + 1) * level_distance, y_offset)
-        #         visited.add(neighbor)
-
-        #     level += 1
-        for i, current_tag in enumerate(tag_path):
-            if current_tag not in G:
-                continue
-            pos[current_tag] = (i * level_distance, 0)
-            visited.add(current_tag)
-
-        # Collect unique neighbors that are not in selected tags
-        all_neighbors = set()
-        for tag in tag_path:
-            if tag not in G:
-                continue
-            neighbors = set(G.neighbors(tag))
-            all_neighbors.update(neighbors)
-
-        # Remove already visited nodes (e.g., selected tags)
-        last_layer_nodes = sorted(all_neighbors - visited)
-        num_neighbors = len(last_layer_nodes)
-
-        # Distribute them vertically in canvas_height
-        canvas_height = 700
-        vertical_step = canvas_height / (num_neighbors + 1)
-
-        for j, neighbor in enumerate(last_layer_nodes):
-            y_offset = (j + 1) * vertical_step - (canvas_height / 2)
-            pos[neighbor] = ((len(tag_path)) * level_distance, y_offset)
-            visited.add(neighbor)
-
-        return pos
-    
-
-    if selected_tags and all(tag in G for tag in selected_tags):
-        pos = multi_level_hierarchical_layout(G, tag_path=selected_tags)
-    else:
-        pos = nx.spring_layout(G, k=0.5, iterations=50)
-
-    pruned_G = prune_edges_to_hierarchy(G, pos)
-
-    edge_x, edge_y = [], []
-    for edge in pruned_G.edges():
-        x0, y0 = pos[edge[0]]
-        x1, y1 = pos[edge[1]]
-        edge_x.extend([x0, x1, None])
-        edge_y.extend([y0, y1, None])
-
-    edge_trace = go.Scatter(
-        x=edge_x, y=edge_y,
-        line=dict(width=1, color='#888'),
-        hoverinfo='none',
-        mode='lines'
-    )
-
-    node_x, node_y, node_text, node_color, node_size, line_colors = [], [], [], [], [], []
-    for node in pruned_G.nodes():
-        x, y = pos[node]
-        node_x.append(x)
-        node_y.append(y)
-        node_data = pruned_G.nodes[node]
-        node_text.append(
-            f"<b>{node}</b><br>Frequency: {node_data['frequency']}<br>"
-            f"Avg ROI: {node_data['avg_roi']:.2f}<br>"
-            f"Avg Profit: {node_data['avg_profit']:.2f}<br>"
-            f"Avg Rating: {node_data['avg_rating']:.2f}"
-        )
-        color_value = node_data.get(color_metric, 0)
-        node_color.append(color_value)
-        node_size.append(20)
-        line_colors.append('red' if node in selected_tags else 'DarkSlateGrey')
-
-    node_trace = go.Scatter(
-        x=node_x, y=node_y,
-        mode='markers+text',
-        text=[node for node in pruned_G.nodes()],
-        textposition="top center",
-        hoverinfo='text',
-        hovertext=node_text,
-        marker=dict(
-            showscale=True,
-            colorscale='YlGnBu',
-            color=node_color,
-            size=node_size,
-            colorbar=dict(title=color_metric.replace('_', ' ').title()),
-            line_width=3,
-            line_color=line_colors
-        )
-    )
-
-    fig = go.Figure(data=[edge_trace, node_trace])
-    fig.update_layout(
-        title='Tag Relationship Network (Tree View)',
-        showlegend=False,
-        hovermode='closest',
-        margin=dict(b=20, l=5, r=5, t=40),
-        xaxis=dict(showgrid=False, zeroline=False, showticklabels=False),
-        yaxis=dict(showgrid=False, zeroline=False, showticklabels=False),
-        height=700,
-        transition={'duration': 500}
-    )
-
-    return fig
-
-
-def preprocess_tag_network(df):
-    # Flatten all tags & count frequency
-    df['tag_list'] = df['tag'].fillna('').str.lower().str.split(';').apply(lambda tags: [t.strip() for t in tags if t.strip()])
-
-    all_tags = df['tag_list'].explode()
-    tag_counts = all_tags.value_counts()
-
-    # Keep only popular tags
-    popular_tags = tag_counts[tag_counts >= 300].index.tolist()
-
-    # Filter df rows to only include tags in popular_tags
-    df['filtered_tags'] = df['tag_list'].apply(lambda tags: [t for t in tags if t in popular_tags])
-
-    # Build co-occurrence counts efficiently
-    from collections import Counter
-    cooc_counter = Counter()
-
-    for tags in df['filtered_tags']:
-        unique_tags = list(set(tags))
-        for i in range(len(unique_tags)):
-            for j in range(i + 1, len(unique_tags)):
-                pair = tuple(sorted([unique_tags[i], unique_tags[j]]))
-                cooc_counter[pair] += 1
-
-    # Build nodes with aggregated metrics
-    nodes = []
-    for tag in popular_tags:
-        tag_movies = df[df['filtered_tags'].apply(lambda tags: tag in tags)]
-        nodes.append({
-            'id': tag,
-            'label': tag,
-            'frequency': tag_counts[tag],
-            'avg_roi': tag_movies['roi'].mean() if not tag_movies.empty else 0,
-            'avg_profit': tag_movies['profit'].mean() if not tag_movies.empty else 0,
-            'avg_rating': tag_movies['vote_average'].mean() if not tag_movies.empty else 0,
-        })
-
-    # Build links
-    links = [{'source': src, 'target': tgt, 'value': count} for (src, tgt), count in cooc_counter.items()]
-
-    return {'nodes': nodes, 'links': links}
 
 # ====== Success Prediction Models ======
 # Prepare data for success prediction
@@ -364,415 +230,527 @@ revenue_model.fit(X_train, y_revenue_train)
 # Get all unique genres from the data
 all_genres = sorted(list(set([genre for sublist in df['genres_list'].dropna() for genre in sublist])))
 
-# Loading saved tsne data
-def load_tsne_data():
-    """Load precomputed TSNE data from disk."""
-    if os.path.exists('tsne_precomputed.pkl'):
-        with open('tsne_precomputed.pkl', 'rb') as f:
-            return pickle.load(f)
-    else:
-        print("Precomputed TSNE file not found. Please run precompute_tsne.py first.")
-        return None
 
-# Load tsne data
-tsne_data = load_tsne_data()
-if tsne_data is None:
-    print("Warning: TSNE data not found. TSNE tab will not work properly.")
+
 
 # Dash app setup
 app = dash.Dash(__name__, suppress_callback_exceptions=True)
-app.title = "Movie Analytics Dashboard"
-network_data = preprocess_tag_network(df)
 
-app.layout = html.Div([
-    html.H1("Movie Financial Analytics", style={"textAlign": "center"}),
-    dcc.Store(id="cluster-count-store", data=3),  # default number of clusters
-    dcc.Store(id='network-data-store', data=network_data),
-    dcc.Tabs([
-        dcc.Tab(label="Budget vs Revenue", children=[
-            html.Div([
-                html.Label("Release Year Range"),
-                dcc.RangeSlider(
-                    id="year-slider",
-                    min=df["release_year"].min(),
-                    max=df["release_year"].max(),
-                    step=1,
-                    value=[df["release_year"].min(), df["release_year"].max()],
-                    marks={str(year): str(year) for year in range(df["release_year"].min(), df["release_year"].max() + 1, 5)},
-                    tooltip={"placement": "bottom"}
-                ),
+# network_data = preprocess_tag_network(df)
 
-                # html.Label("Color By"),
-                # dcc.Dropdown(
-                #     id="color-by",
-                #     options=[
-                #         {"label": "ROI (%)", "value": "roi"},
-                #         {"label": "Profit Margin", "value": "profit_margin"},
-                #         {"label": "Vote Average", "value": "vote_average"},
-                #         {"label": "Primary Genre", "value": "primary_genre"},
-                #         {"label": "Runtime", "value": "runtime"},
-                #         {"label": "Cluster Label", "value": "cluster_label"}
-                #     ],
-                #     value="roi",
-                #     clearable=False
-                # ),
+app.title = "Movie Success Studio"
 
-                html.Div([
-                    html.Div([
-                        html.Label("Color By"),
-                        dcc.Dropdown(
-                            id="color-by",
-                            options=[
-                                {"label": "ROI (%)", "value": "roi"},
-                                {"label": "Profit Margin", "value": "profit_margin"},
-                                {"label": "Vote Average", "value": "vote_average"},
-                                {"label": "Primary Genre", "value": "primary_genre"},
-                                {"label": "Runtime", "value": "runtime"},
-                                {"label": "Cluster Label", "value": "cluster_label"}
-                            ],
-                            value="roi",
-                            clearable=False
-                        ),                        
-                        dcc.Graph(id="scatter-plot", style={"height": "700px", "width": "100%"})
-                    ], style={"flex": "3", "padding": "10px"}),
+app.layout = html.Div([ 
+    dcc.Store(id="current-filter", data={"genres": None, "scatter_ids": None, "zoom_ids": None}),
+    dcc.Store(id="prediction-store", data=None),
 
-                    html.Div([
-                        # html.H3("Movie Table"),
-                            html.Label("Sort By"),
-                            dcc.Dropdown(
-                                id="movie-sort-by",
-                                options=[
-                                    {"label": "Revenue", "value": "revenue"},
-                                    {"label": "ROI", "value": "roi"},
-                                    {"label": "Rating", "value": "vote_average"}
-                                ],
-                                value="revenue",
-                                clearable=False
-                            ),
-                            html.H3("Movie Table"),
-                            html.Ul(id="movie-table", style={
-                            "listStyleType": "none",
-                            "padding": 0,
-                            "maxHeight": "700px",
-                            "overflowY": "auto"
-                        })
-                    # ], style={"flex": "1", "padding": "10px"})
-                    #     dash_table.DataTable(
-                    #         id="movie-table",
-                    #         columns=[
-                    #             {"name": "Title", "id": "title_y"},
-                    #             {"name": "Year", "id": "release_year"},
-                    #             {"name": "Budget ($)", "id": "budget"},
-                    #             {"name": "Revenue ($)", "id": "revenue"},
-                    #             {"name": "Profit ($)", "id": "profit"},
-                    #             {"name": "ROI %", "id": "roi"},
-                    #             {"name": "Rating", "id": "vote_average"}
-                    #         ],
-                    #         page_size=10,
-                    #         style_table={"overflowX": "auto"},
-                    #         style_cell={"textAlign": "left", "padding": "8px"},
-                    #         style_header={"fontWeight": "bold"}
-                    #     )
-                    ], style={"flex": "1", "padding": "10px", "overflowY": "auto", "maxHeight": "700px"})
-                ], style={"display": "flex", "flexDirection": "row"})
-            ], style={"padding": "20px"})
-        ]),
-
-        dcc.Tab(label="Dimensionality Reduction (TSNE)", children=[
-            html.Div([
-                html.Label("Release Year Range"),
-                dcc.RangeSlider(
-                    id="tsne-year-slider",
-                    min=df["release_year"].min(),
-                    max=df["release_year"].max(),
-                    step=1,
-                    value=[df["release_year"].min(), df["release_year"].max()],
-                    marks={str(year): str(year) for year in range(df["release_year"].min(), df["release_year"].max() + 1, 5)},
-                    tooltip={"placement": "bottom"}
-                ),
-
-                html.Label("Number of Clusters"),
-                dcc.Dropdown(
-                    id="cluster-count",
-                    options=[{"label": str(i), "value": i} for i in range(2, 11)],
-                    value=3,
-                    clearable=False
-                ),
-
-                dcc.Graph(id="tsne-plot", style={"height": "600px"})
-            ], style={"padding": "20px"})
-        ]),
-        
-        dcc.Tab(label="Genre Exploration", children=[
-            html.Div([
-                html.Div([  # Controls section
-                    html.Label("Release Year Range"),
-                    dcc.RangeSlider(
-                        id="genre-year-slider",
-                        min=df["release_year"].min(),
-                        max=df["release_year"].max(),
-                        step=1,
-                        value=[df["release_year"].min(), df["release_year"].max()],
-                        marks={str(year): str(year) for year in range(df["release_year"].min(), df["release_year"].max() + 1, 5)},
-                        tooltip={"placement": "bottom"}
-                    ),
-                    
-                    html.Label("Color By"),
-                    dcc.Dropdown(
-                        id="genre-color-by",
-                        options=[
-                            {"label": "Average ROI (%)", "value": "roi"},
-                            {"label": "Average Profit", "value": "profit"},
-                            {"label": "Average Rating", "value": "vote_average"},
-                            {"label": "Number of Movies", "value": "count"}
-                        ],
-                        value="count",
-                        clearable=False
-                    ),
-                ], style={"width": "100%", "marginBottom": "20px"}),
-                
-                # Visualizations section
+    # ==== TOP SECTION ====
+    html.Div([
+        # LEFT (20%)
         html.Div([
-            # Sunburst graph (fills space)
-            html.Div(
-                dcc.Graph(
-                    id="genre-sunburst",
-                    config={"responsive": True},  # Makes graph fill container
-                    style={
-                        "height": "100%",  # Fills parent div
-                        "width": "100%",   # Fills parent div
-                    }
-                ),
-                style={
-                    "flex": "3",          # Takes 75% of width
-                    "minHeight": "600px",  # Dynamic but constrained
-                    "maxHeight": "700px", # Preoversizing
-                    "padding": "0px",     # Remove padding (can add back if needed)
-                }
-            ),
-            
-            # Movie list (fixed width)
-            html.Div(
-                html.Div(id="genre-movie-list"),
-                style={
-                    "flex": "1",          # Takes 25% of width
-                    "overflowY": "auto",  # Scroll if content overflows
-                    "minHeight": "600px",  # Match sunburst height
-                    "maxHeight": "700px",
-                    "padding": "10px",
-                }
-            )
-        ], style={
-            "display": "flex",
-            "gap": "10px",
-            "width": "100%",
-            "height": "auto",  # Prevents container from expanding
-        })
-
-
-            ], style={"padding": "20px"})
-        ]),
-        #Success Predictor tab
-        dcc.Tab(label="Success Predictor", children=[
-            html.Div([
-                html.H2("Movie Success Prediction Tool", style={'textAlign': 'center'}),
-
-                # Main container - 2 columns: left for input/results, right for graph
-                html.Div([
-                    # Left Column
-                    html.Div([
-                        # Inputs (Top Left)
-                        html.Div([
-                            html.Div([
-                                # Row 1: Budget + Runtime
-                                html.Div([
-                                    html.Div([
-                                        html.Label("Budget (in millions)"),
-                                        dcc.Input(id='budget-input', type='number', value=50, min=1, step=1, style={'width': '100%'})
-                                    ], style={'width': '48%', 'display': 'inline-block', 'marginRight': '4%'}),
-
-                                    html.Div([
-                                        html.Label("Runtime (minutes)"),
-                                        dcc.Input(id='runtime-input', type='number', value=120, min=60, max=240, step=5, style={'width': '100%'})
-                                    ], style={'width': '48%', 'display': 'inline-block'})
-                                ], style={'marginBottom': '10px'}),
-
-                                # Row 2: Language + Year
-                                html.Div([
-                                    html.Div([
-                                        html.Label("Original Language"),
-                                        dcc.Dropdown(
-                                            id='language-input',
-                                            options=[{'label': 'English', 'value': 1},
-                                                    {'label': 'Non-English', 'value': 0}],
-                                            value=1,
-                                            style={'width': '100%'}
-                                        )
-                                    ], style={'width': '48%', 'display': 'inline-block', 'marginRight': '4%'}),
-
-                                    html.Div([
-                                        html.Label("Release Year"),
-                                        dcc.Input(id='year-input', type='number', value=2023, min=1900, max=2030, step=1, style={'width': '100%'})
-                                    ], style={'width': '48%', 'display': 'inline-block'})
-                                ], style={'marginBottom': '10px'}),
-
-                                # Row 3: Genres full width
-                                html.Div([
-                                    html.Label("Genres"),
-                                    dcc.Dropdown(
-                                        id='genres-input',
-                                        options=[{'label': genre, 'value': genre} for genre in all_genres],
-                                        multi=True,
-                                        value=['Action'],
-                                        style={'width': '100%'}
-                                    )
-                                ], style={'marginBottom': '15px'}),
-
-                                # Predict button
-                                html.Button('Predict Success', id='predict-button', n_clicks=0,
-                                            style={'background-color': '#4CAF50', 'color': 'white', 'width': '100%', 'padding': '10px'})
-                            ])
-                        ], style={'marginBottom': '20px'}),
-
-                        
-                        # Results + Recommendations (Bottom Left)
-                        html.Div([
-                            html.Div(id='success-output', style={
-                                'fontSize': '16px', 'padding': '10px', 'marginBottom': '8px',
-                                'backgroundColor': '#f8f9fa', 'borderRadius': '5px'
-                            }),
-                            html.Div(id='rating-output', style={
-                                'fontSize': '16px', 'padding': '10px', 'marginBottom': '8px',
-                                'backgroundColor': '#f8f9fa', 'borderRadius': '5px'
-                            }),
-                            html.Div(id='revenue-output', style={
-                                'fontSize': '16px', 'padding': '10px', 'marginBottom': '8px',
-                                'backgroundColor': '#f8f9fa', 'borderRadius': '5px'
-                            }),
-                            html.Div(id='roi-output', style={
-                                'fontSize': '16px', 'padding': '10px', 'marginBottom': '8px',
-                                'backgroundColor': '#f8f9fa', 'borderRadius': '5px'
-                            }),
-                            html.H3("Recommendations for Improvement", style={'marginTop': '20px'}),
-                            html.Div(id='recommendations', style={
-                                'padding': '10px',
-                                'backgroundColor': '#e9ecef',
-                                'borderRadius': '5px'
-                            })
-                        ])
-                    ], style={'width': '40%', 'padding': '10px', 'display': 'inline-block', 'verticalAlign': 'top'}),
-
-                    # Right Column: Sensitivity Plot
-                    html.Div([
-                        dcc.Graph(id='sensitivity-plot', style={'height': '100%', 'width': '100%'})
-                    ], style={'width': '58%', 'display': 'inline-block', 'padding': '10px', 'verticalAlign': 'top'})
-                ], style={'display': 'flex', 'justifyContent': 'space-between'}),
-
-            ], style={'padding': '20px', 'height': '100vh', 'boxSizing': 'border-box', 'overflow': 'hidden'})
-        ]),
-        dcc.Tab(label="Tag Network Analysis", children=[
-            html.Div([
-                html.H2("Movie Tag Network Visualization"),
-
-                html.Label("Select Tags:"),
-                dcc.Dropdown(
-                    id='selected-tags-dropdown',
-                    options=[],  # start empty, filled by callback
-                    multi=True,
-                    style={"width": "100%"}
-                ),
-
-                html.Br(),
-
-                html.Label("Node Color Metric:"),
-                dcc.Dropdown(
-                    id='node-color-metric',
+            html.Label("Color by:"),
+            dcc.Dropdown(
+                    id="color-by",
                     options=[
-                        {"label": "Frequency", "value": "frequency"},
-                        {"label": "Average ROI", "value": "avg_roi"},
-                        {"label": "Average Profit", "value": "avg_profit"},
-                        {"label": "Average Rating", "value": "avg_rating"},
+                        {"label": "Vote Average", "value": "vote_average"},
+                        {"label": "ROI", "value": "roi"},
+                        {"label": "Runtime", "value": "runtime"},
+                        {"label": "Profit", "value": "profit"}
                     ],
-                    value="frequency",
-                    clearable=False,
-                ),
+                value="roi",
+                style={"margin-bottom": "10px"}
+            ),
+            # html.Label("Year Range:"),
+            # dcc.RangeSlider(
+            #     id="shared-year-slider",
+            #     min=2000, max=2020, step=1, value=[2000, 2020],
+            #     marks={str(y): str(y) for y in range(2000, 2021, 5)},
+            #     tooltip={"always_visible": True},
+            #     allowCross=False,
+            # ),
+            dcc.Graph(id="genre-icicle", style={"height": "40vh", "width": "100%"})
+        ], style={"width": "20%", "padding": "10px", "display": "inline-block", "verticalAlign": "top"}),
 
-                dcc.Graph(id='tag-network-graph', style={'height': '700px'}),
+    # RIGHT (80%)
+    html.Div([
+        # Scatterplot controls with labels above
+        html.Div([
+            # Color by dropdown with label above
+            # html.Div([
+            #     html.Label("Color by:", style={"margin-bottom": "5px"}),
+            #     dcc.Dropdown(
+            #         id="color-by",
+            #         options=[
+            #             {"label": "Vote Average", "value": "vote_average"},
+            #             {"label": "ROI", "value": "roi"},
+            #             {"label": "Runtime", "value": "runtime"},
+            #             {"label": "Profit", "value": "profit"}
+            #         ],
+            #         value="vote_average",
+            #         style={"width": "200px", "marginRight": "20px"}
+            #     )
+            # ], style={"display": "inline-block", "marginRight": "20px"}),
+            
+            # X-axis dropdown with label above
+            html.Div([
+                html.Label("X-axis:", style={"margin-bottom": "5px"}),
+                dcc.Dropdown(
+                    id="x-axis-dropdown",
+                    options=[
+                        {"label": "Budget", "value": "budget"},
+                        {"label": "Revenue", "value": "revenue"},
+                        {"label": "Profit", "value": "profit"},
+                        {"label": "ROI", "value": "roi"},
+                        {"label": "Vote Average", "value": "vote_average"},
+                        {"label": "Runtime", "value": "runtime"}
+                    ],
+                    value="budget",
+                    style={"width": "200px", "marginRight": "20px"}
+                )
+            ], style={"display": "inline-block", "marginRight": "20px"}),
+            
+            # Y-axis dropdown with label above
+            html.Div([
+                html.Label("Y-axis:", style={"margin-bottom": "5px"}),
+                dcc.Dropdown(
+                    id="y-axis-dropdown",
+                    options=[
+                        {"label": "Revenue", "value": "revenue"},
+                        {"label": "Budget", "value": "budget"},
+                        {"label": "Profit", "value": "profit"},
+                        {"label": "ROI", "value": "roi"},
+                        {"label": "Vote Average", "value": "vote_average"},
+                        {"label": "Runtime", "value": "runtime"}
+                    ],
+                    value="revenue",
+                    style={"width": "200px"}
+                )
+            ], style={"display": "inline-block"}),
+                        html.Div([
+            html.Label("Year Range:"),
+            dcc.RangeSlider(
+                id="shared-year-slider",
+                min=2000, max=2020, step=1, value=[2000, 2020],
+                marks={str(y): str(y) for y in range(2000, 2021, 5)},
+                tooltip={"always_visible": True},
+                allowCross=False,
+            ),
+            ], style={"display": "inline-block", "flex": 1, "minWidth": "300px"})
+            
+        ], style={"margin-bottom": "15px", "display": "flex", "alignItems": "flex-start"}),
 
-                html.Div(id='genre-distribution', style={"marginTop": "20px"})
-            ])
-        ])
-    ])#close all the tabs
-])
+        dcc.Graph(id="scatter-plot", style={"height": "47vh", "width": "100%"})
+    ], style={"width": "80%", "padding": "10px", "display": "inline-block", "verticalAlign": "top"})
+    ], style={"display": "flex", "height": "55vh"}),
 
+    # ==== BOTTOM SECTION ====
+    html.Div([
+        # LEFT SIDE (40%)
+        html.Div([
+            html.H3("Movie Success Predictor"),
+            html.Div([
+                # Inputs (50% width)
+                html.Div([
+                    html.Label("Budget (in millions)"),
+                    dcc.Input(id='budget-input', type='number', value=50, min=0.1, step=0.01,
+                              style={'width': '100%', 'marginBottom': '10px'}),
 
+                    html.Label("Runtime (minutes)"),
+                    dcc.Input(id='runtime-input', type='number', value=120, min=60, max=240, step=1,
+                              style={'width': '100%', 'marginBottom': '10px'}),
 
+                    html.Label("Original Language"),
+                    dcc.Dropdown(
+                        id='language-input',
+                        options=[{'label': 'English', 'value': 1}, {'label': 'Non-English', 'value': 0}],
+                        value=1,
+                        style={'width': '100%', 'marginBottom': '10px'}
+                    ),
+
+                    html.Label("Genres"),
+                    dcc.Dropdown(
+                        id='genres-input',
+                        options=[{'label': genre, 'value': genre} for genre in all_genres],
+                        multi=True,
+                        value=['Action'],
+                        style={'width': '100%', 'marginBottom': '10px'}
+                    ),
+
+                    html.Button('Predict Success', id='predict-button', n_clicks=0,
+                                style={'background-color': '#4CAF50', 'color': 'white',
+                                       'width': '100%', 'padding': '10px'})
+                ], style={"width": "35%", "paddingRight": "10px"}),
+
+# Outputs (50% width)
+html.Div([
+    # First row container
+    html.Div([
+        # Success Probability
+        html.Div([
+            html.Div("Success Probability:", style={'fontWeight': 'bold'}),
+            html.Div(id='success-output', style={
+                'fontSize': '14px',
+                'padding': '8px',
+                'backgroundColor': '#ffffff',
+                'color': '#333333',
+                'borderRadius': '5px',
+                'marginTop': '5px'
+            })
+        ], style={'width': '48%', 'display': 'inline-block', 'marginRight': '4%'}),
+        
+        # Rating
+        html.Div([
+            html.Div("Rating:", style={'fontWeight': 'bold'}),
+            html.Div(id='rating-output', style={
+                'fontSize': '14px',
+                'padding': '8px',
+                'backgroundColor': '#ffffff',
+                'color': '#333333',
+                'borderRadius': '5px',
+                'marginTop': '5px'
+            })
+        ], style={'width': '48%', 'display': 'inline-block'})
+    ], style={'marginBottom': '15px'}),
+    
+    # Second row container
+    html.Div([
+        # Revenue
+        html.Div([
+            html.Div("Revenue:", style={'fontWeight': 'bold'}),
+            html.Div(id='revenue-output', style={
+                'fontSize': '14px',
+                'padding': '8px',
+                'backgroundColor': '#ffffff',
+                'color': '#333333',
+                'borderRadius': '5px',
+                'marginTop': '5px'
+            })
+        ], style={'width': '48%', 'display': 'inline-block', 'marginRight': '4%'}),
+        
+        # ROI
+        html.Div([
+            html.Div("ROI:", style={'fontWeight': 'bold'}),
+            html.Div(id='roi-output', style={
+                'fontSize': '14px',
+                'padding': '8px',
+                'backgroundColor': '#ffffff',
+                'color': '#333333',
+                'borderRadius': '5px',
+                'marginTop': '5px'
+            })
+        ], style={'width': '48%', 'display': 'inline-block'})
+    ], style={'marginBottom': '15px'}),
+    
+    # Recommendations section
+    html.Div([
+        html.Div("Recommendations for Improvement", 
+                style={'fontWeight': 'bold', 'marginBottom': '5px'}),
+        html.Div(id='recommendations', style={
+            'padding': '10px',
+            'backgroundColor': '#ffffff',
+            'borderRadius': '5px',
+            'minHeight': '80px',
+            'overflowY': 'auto',
+            'border': '1px solid #e0e0e0',  # Light gray border
+            'boxShadow': '0 2px 4px rgba(0,0,0,0.05)'  # Subtle shadow
+        })
+    ])
+], style={
+    'width': '65%',
+    'paddingLeft': '10px',
+    'boxSizing': 'border-box'
+})
+            ], style={"display": "flex"}),
+        ], style={"width": "40%", "padding": "10px", "display": "inline-block", "verticalAlign": "top", "height": "100%"}),
+
+        # RIGHT SIDE (60%) - Sensitivity Plot
+        html.Div([
+            dcc.Graph(id='sensitivity-plot', style={'height': '40vh', 'width': '100%'})
+        ], style={"width": "60%", "padding": "10px", "display": "inline-block", "verticalAlign": "top", "height": "100%"})
+    ], style={"display": "flex", "height": "45vh"})
+], style={
+    'backgroundColor': '#f5f5f5',  # Very light gray
+    'color': '#333333',            # Dark gray text
+    "fontFamily": 'Sans-serif', # prettier font
+    'margin': '0',          # Remove outer margin
+    'padding': '0',         # Remove outer padding
+    'height': '100vh',      # Full viewport height
+    'width': '100vw',       # Full viewport width
+
+})
 
 
 
 # === Callbacks ===
+from dash.dependencies import Input, Output, State
 
-# Update stored cluster count when user changes it in TSNE tab
+
+
 @app.callback(
-    Output("cluster-count-store", "data"),
-    Input("cluster-count", "value")
+    Output("current-filter", "data", allow_duplicate=True),
+    Input("scatter-plot", "relayoutData"),
+    [
+        State("current-filter", "data"),
+        State("x-axis-dropdown", "value"),
+        State("y-axis-dropdown", "value")
+    ],
+    prevent_initial_call=True
 )
-def update_cluster_store(n_clusters):
-    return n_clusters
+def update_filter_from_zoom(relayout_data, current_filter, x_axis, y_axis):
+    if current_filter is None:
+        current_filter = {"genres": None, "scatter_ids": None, "zoom_ids": None}
+
+    if not relayout_data:
+        return {**current_filter, "zoom_ids": None}
+
+    # Check if we have axis range data (for either linear or log axes)
+    x_keys = [f"xaxis.range[0]", f"xaxis.range[1]"]
+    y_keys = [f"yaxis.range[0]", f"yaxis.range[1]"]
+    
+    if not (all(k in relayout_data for k in x_keys) and all(k in relayout_data for k in y_keys)):
+        return {**current_filter, "zoom_ids": None}
+
+    x0 = relayout_data[x_keys[0]]
+    x1 = relayout_data[x_keys[1]]
+    y0 = relayout_data[y_keys[0]]
+    y1 = relayout_data[y_keys[1]]
+
+    # Start with full dataset
+    zoom_dff = df
+    
+    # Apply genre filter if one exists
+    if current_filter.get("genres"):
+        selected_genre = current_filter["genres"]
+        if '-' in selected_genre:
+            zoom_dff = zoom_dff[zoom_dff["genres_y"].str.startswith(selected_genre, na=False)]
+        else:
+            zoom_dff = zoom_dff[zoom_dff["genres_y"].str.startswith(selected_genre, na=False)]
+    
+    # Handle axis transformations based on current axis type
+    x_log = x_axis in ["budget", "revenue", "profit", "roi"]
+    y_log = y_axis in ["budget", "revenue", "profit", "roi"]
+    
+    # Apply x-axis filter
+    if x_log:
+        x_min = 10 ** x0 if x0 is not None else 0
+        x_max = 10 ** x1 if x1 is not None else float('inf')
+    else:
+        x_min = x0 if x0 is not None else 0
+        x_max = x1 if x1 is not None else float('inf')
+    
+    # Apply y-axis filter
+    if y_log:
+        y_min = 10 ** y0 if y0 is not None else 0
+        y_max = 10 ** y1 if y1 is not None else float('inf')
+    else:
+        y_min = y0 if y0 is not None else 0
+        y_max = y1 if y1 is not None else float('inf')
+    
+    # Apply range filters
+    zoom_dff = zoom_dff[
+        (zoom_dff[x_axis] >= x_min) & (zoom_dff[x_axis] <= x_max) &
+        (zoom_dff[y_axis] >= y_min) & (zoom_dff[y_axis] <= y_max)
+    ]
+
+    zoom_ids = zoom_dff["title_y"].tolist()
+    return {**current_filter, "zoom_ids": zoom_ids}
 
 
+
+@app.callback(
+    Output("current-filter", "data"),
+    [
+        Input("scatter-plot", "selectedData"),
+        Input("genre-icicle", "clickData")
+    ],
+    State("current-filter", "data")
+)
+def update_current_filter(scatter_selected, icicle_click, current_filter):
+    ctx = callback_context
+
+    if current_filter is None:
+        current_filter = {"genres": None, "scatter_ids": None, "zoom_ids": None}
+
+    if not ctx.triggered:
+        return current_filter
+
+    triggered_id = ctx.triggered[0]["prop_id"].split(".")[0]
+
+    if triggered_id == "scatter-plot":
+        if scatter_selected is None or "points" not in scatter_selected:
+            return {**current_filter, "scatter_ids": None}
+        selected_titles = [point["hovertext"] for point in scatter_selected["points"]]
+        return {**current_filter, "scatter_ids": selected_titles}
+
+
+    elif triggered_id == "genre-icicle":
+        if icicle_click is None:
+            return {**current_filter, "genres": None}
+    #     clicked_id = icicle_click["points"][0].get("id", None)
+    #     return {**current_filter, "genres": clicked_id}
+    # return current_filter
+
+        clicked_id = icicle_click["points"][0].get("id", None)
+        path = clicked_id.split("/")
+        # The path now has format: "All Movies/Parent Genre/Subgenre"
+        if len(path) == 3:  # Clicked on a subgenre
+            parent_genre = path[1]
+            subgenre = path[2]
+            clicked_id = f"{parent_genre}/{subgenre}"
+        elif len(path) == 2:  # Clicked on a parent genre
+            clicked_id = path[1]
+        else:
+            clicked_id = None
+            
+        return {**current_filter, "genres": clicked_id}
+    
+    return current_filter
+    
+
+
+
+###SCATTERPLOT###
 @app.callback(
     Output("scatter-plot", "figure"),
-    [Input("year-slider", "value"),
-     Input("color-by", "value"),
-     Input("cluster-count-store", "data")]
+    [
+        Input("shared-year-slider", "value"),
+        Input("color-by", "value"),
+        Input("x-axis-dropdown", "value"),
+        Input("y-axis-dropdown", "value"),
+        Input("current-filter", "data"),
+        Input("prediction-store", "data")
+    ],
+    [State("scatter-plot", "relayoutData")]
 )
-def update_scatter_figure(year_range, color_by, n_clusters):
+def update_scatter(year_range, color_by, x_axis, y_axis,current_filter, prediction_data, relayout_data):
+    
     dff = df[(df["release_year"] >= year_range[0]) & (df["release_year"] <= year_range[1])]
+
+    if current_filter and current_filter.get("genres"):
+        clicked_id = current_filter["genres"]
+        genres_selected = clicked_id.split('/')
+
+        if len(genres_selected) == 1:
+            selected_primary = genres_selected[0]
+
+            def match_primary_genre(row):
+                if pd.isna(row["genres_y"]):
+                    return False
+                return row["genres_y"].split('-')[0] == selected_primary
+
+            dff = dff[dff.apply(match_primary_genre, axis=1)]
+
+        elif len(genres_selected) == 2:
+            exact_genre = '-'.join(genres_selected)
+
+            def match_exact_genre(row):
+                return row["genres_y"] == exact_genre
+
+            dff = dff[dff.apply(match_exact_genre, axis=1)]
+
+
+    if dff.empty:
+        return px.scatter(title="No data to display for this selection.")
+    # rest of your original code here ...
     dff = dff.dropna(subset=["budget", "revenue", "vote_count", color_by] if color_by != "cluster_label" else numeric_features)
 
-    if color_by == "cluster_label":
-        X = dff[numeric_features]
-        X_scaled = StandardScaler().fit_transform(X)
-        kmeans = KMeans(n_clusters=n_clusters, random_state=42)
-        dff["cluster_label"] = kmeans.fit_predict(X_scaled).astype(str)
-        color_by_plot = "cluster_label"
+    if color_by in ["roi", "vote_average"]:
+        lower = dff[color_by].quantile(0.05)
+        upper = dff[color_by].quantile(0.95)
+        dff["color_clip"] = dff[color_by].clip(lower, upper)
+        color_by_plot = "color_clip"
+    elif color_by in ["runtime", "profit"]: 
+        lower = dff[color_by].quantile(0.01)
+        upper = dff[color_by].quantile(0.99)
+        dff["color_clip"] = dff[color_by].clip(lower, upper)
+        color_by_plot = "color_clip"
     else:
-        dff = dff.drop(columns=["cluster_label"], errors="ignore")
-        if color_by in ["roi", "vote_average"]:
-            lower = dff[color_by].quantile(0.05)
-            upper = dff[color_by].quantile(0.95)
-            dff["color_clip"] = dff[color_by].clip(lower, upper)
-            color_by_plot = "color_clip"
-        elif color_by in ["runtime"]:
-            lower = dff[color_by].quantile(0.01)
-            upper = dff[color_by].quantile(0.99)
-            dff["color_clip"] = dff[color_by].clip(lower, upper)
-            color_by_plot = "color_clip"
-        else:
-            color_by_plot = color_by
+        color_by_plot = color_by
 
     scaler = MinMaxScaler(feature_range=(2, 80))
     dff["scaled_size"] = scaler.fit_transform(dff[["vote_count"]])
 
+
     fig = px.scatter(
         dff,
-        x="budget",
-        y="revenue",
+        x=x_axis,
+        y=y_axis,
         color=color_by_plot,
         size="vote_count",
         hover_name="title_y",
         hover_data=["release_year", "budget", "revenue", "profit", "roi", "vote_average"],
         labels={"color_clip": color_by},
-        log_x=True,
-        log_y=True,
-        title=f"Budget vs Revenue ({year_range[0]}–{year_range[1]})"
+        # title=f"{x_axis.title()} vs {y_axis.title()} ({year_range[0]}–{year_range[1]})",
+        log_x=x_axis in ["budget", "revenue", "profit", "roi"],
+        log_y=y_axis in ["budget", "revenue", "profit", "roi"]
     )
 
+    # fig.update_traces(type='scatter', selector=dict(type='scattergl'))
+    # Add prediction marker if available
+    if isinstance(prediction_data, dict):
+        # Map axis names to prediction_data keys
+        pred_axis_map = {
+            'budget': 'budget',
+            'revenue': 'revenue_pred',  # Note: predicted revenue key
+            'profit': 'profit_pred' if 'profit_pred' in prediction_data else None,
+            'roi': 'roi_pred' if 'roi_pred' in prediction_data else None,
+            'vote_average': 'rating_pred',
+            'runtime': 'runtime_pred' if 'runtime_pred' in prediction_data else None,
+            # Add more mappings if available
+        }
+
+        pred_x_key = pred_axis_map.get(x_axis)
+        pred_y_key = pred_axis_map.get(y_axis)
+
+        # Check if both keys are valid and present in prediction_data
+        if pred_x_key in prediction_data and pred_y_key in prediction_data:
+            fig.add_trace(go.Scattergl(
+                x=[prediction_data[pred_x_key]],
+                y=[prediction_data[pred_y_key]],
+                mode='markers',
+                marker=dict(
+                    symbol='diamond',
+                    color='lime',
+                    size=15,
+                    line=dict(width=3, color='black')
+                ),
+                name='Prediction',
+                hovertemplate=(
+                    f"Predicted {x_axis.replace('_',' ').title()}: $%{{x:.2s}}<br>"
+                    f"Predicted {y_axis.replace('_',' ').title()}: $%{{y:.2s}}<br>"
+                    "Predicted Rating: %{customdata[0]:.1f}<br>"
+                    "Success Probability: %{customdata[1]:.1%}<extra></extra>"
+                ),
+                customdata=[[prediction_data.get('rating_pred', None),
+                            prediction_data.get('success_prob', None)]]
+            ))
+
     fig.update_layout(
-        xaxis_title="Budget (log)",
-        yaxis_title="Revenue (log)",
+        xaxis_title=x_axis.replace("_", " ").title(),
+        yaxis_title=y_axis.replace("_", " ").title(),
         hovermode="closest"
+    )
+
+    # --- Preserve zoom manually ---
+    if relayout_data:
+        for axis in ["xaxis", "yaxis"]:
+            r0 = relayout_data.get(f"{axis}.range[0]")
+            r1 = relayout_data.get(f"{axis}.range[1]")
+            if r0 is not None and r1 is not None:
+                fig.update_layout(**{axis: dict(range=[r0, r1])})
+
+
+    fig = prettify_figure(
+        fig,
+        x_axis=x_axis,
+        y_axis=y_axis
+    )
+    fig.update_layout(
+        plot_bgcolor='#f5f5f5',
+        paper_bgcolor='#f5f5f5',
+        font=dict(color='#333333', family='Sans-serif'),
+
+
     )
     return fig
 
@@ -809,168 +787,182 @@ def update_movie_table(relayout_data, year_range, sort_by):
         ]) for _, movie in top_movies.iterrows()
     ]
     return movie_list
-# Budget vs Revenue tab
-# def update_scatter(year_range, color_by, n_clusters, sort_by, relayout_data):
+
+
+
+# Genre Exploration tab
+# @app.callback(
+#     Output("genre-sunburst", "figure"),
+#     [
+#         Input("shared-year-slider", "value"),
+#         Input("genre-color-by", "value"),
+#         Input("current-filter", "data")
+#     ]
+# )
+# def update_sunburst(year_range, color_by, current_filter):
 #     dff = df[(df["release_year"] >= year_range[0]) & (df["release_year"] <= year_range[1])]
-#     dff = dff.dropna(subset=["budget", "revenue", "vote_count", color_by] if color_by != "cluster_label" else numeric_features)
 
-#     # Apply clustering only if needed
-#     if color_by == "cluster_label":
-#         X = dff[numeric_features]
-#         X_scaled = StandardScaler().fit_transform(X)
-#         kmeans = KMeans(n_clusters=n_clusters, random_state=42)
-#         dff["cluster_label"] = kmeans.fit_predict(X_scaled).astype(str)
-#         color_by_plot = "cluster_label"
+#     if current_filter:
+#         if current_filter.get("zoom_ids"):
+#             dff = dff[dff["title_y"].isin(current_filter["zoom_ids"])]
+#         elif current_filter.get("scatter_ids"):
+#             dff = dff[dff["title_y"].isin(current_filter["scatter_ids"])]
+
+#     genre_hierarchy = []
+#     for _, row in dff.iterrows():
+#         if pd.isna(row['genres_y']):
+#             continue
+#         genres = row['genres_y'].split('-')
+#         print(genres)
+#         if len(genres) > 1:
+#             primary = genres[0]
+#             for sub in genres[1:]:
+#                 genre_hierarchy.append({
+#                     'primary': primary,
+#                     'sub': sub,
+#                     'ids': f"{primary}-{sub}",
+#                     'labels': sub,
+#                     'parents': primary,
+#                     'budget': row['budget'],
+#                     'revenue': row['revenue'],
+#                     'profit': row['profit'],
+#                     'roi': row['roi'],
+#                     'vote_average': row['vote_average']
+#                 })
+
+#     if not genre_hierarchy:
+#         return px.sunburst(title="No genre data available.")
+
+#     hierarchy_df = pd.DataFrame(genre_hierarchy)
+
+#     if color_by == 'count':
+#         agg_df = hierarchy_df.groupby(['ids', 'labels', 'parents']).size().reset_index(name='count')
+#         color_col = 'count'
+#         values = agg_df['count']
 #     else:
-#         if "cluster_label" in dff.columns:
-#             dff = dff.drop(columns=["cluster_label"])
-#         if color_by in ["roi", "vote_average"]:
-#             lower = dff[color_by].quantile(0.01)
-#             upper = dff[color_by].quantile(0.99)
-#             dff["ROI clipped"] = dff[color_by].clip(lower, upper)
-#             color_by_plot = "ROI clipped"
+#         agg_df = hierarchy_df.groupby(['ids', 'labels', 'parents']).agg({
+#             'roi': 'mean',
+#             'profit': 'mean',
+#             'vote_average': 'mean'
+#         }).reset_index()
+
+#         if color_by in ['roi', 'vote_average']:
+#             lower = agg_df[color_by].quantile(0.01)
+#             upper = agg_df[color_by].quantile(0.99)
+#             agg_df['color_scaled'] = agg_df[color_by].clip(lower, upper)
+#             color_col = 'color_scaled'
 #         else:
-#             color_by_plot = color_by
+#             color_col = color_by
 
+#         values = agg_df[color_by].abs()
 
-
-#     scaler = MinMaxScaler(feature_range=(2, 80))
-#     dff["scaled_size"] = scaler.fit_transform(dff[["vote_count"]])
-#     fig = px.scatter(
-#         dff,
-#         x="budget",
-#         y="revenue",
-#         color=color_by_plot,
-#         #size="scaled_size",
-#         size="vote_count",
-#         hover_name="title_y",
-#         hover_data=["release_year", "budget", "revenue", "profit", "roi", "vote_average"],
-#         labels={
-#             "budget": "Budget ($)",
-#             "revenue": "Revenue ($)",
-#             "roi": "ROI %",
-#             "vote_average": "Rating",
-#             "primary_genre": "Genre",
-#             "cluster_label": "Cluster"
-#         },
-#         title=f"Budget vs Revenue ({year_range[0]}–{year_range[1]})",
-#         log_x=True,
-#         log_y=True
+#     fig = px.sunburst(
+#         agg_df,
+#         path=['parents', 'labels'],
+#         values='count' if color_by == 'count' else values,
+#         color=color_col,
+#         # title=f"Movie Genre Hierarchy ({year_range[0]}–{year_range[1]})",
+#         branchvalues="total"
 #     )
 
 #     fig.update_layout(
-#         xaxis_title="Budget (log)",
-#         yaxis_title="Revenue (log)",
+#         margin=dict(t=40, l=0, r=0, b=0),
 #         hovermode="closest"
 #     )
-#     # Now filter movies visible inside zoom window, if zoom is active
-#     if relayout_data:
-#         # Extract axis ranges if present
-#         x_range = relayout_data.get("xaxis.range[0]"), relayout_data.get("xaxis.range[1]")
-#         y_range = relayout_data.get("yaxis.range[0]"), relayout_data.get("yaxis.range[1]")
 
-#         # Only filter if both ranges are defined (zoom or pan)
-#         if None not in x_range and None not in y_range:
-#             # Filter by visible budget and revenue ranges (log scale)
-#             # dff has budget and revenue in normal scale, but plot is log scaled
-#             # So filter by actual scale values
-#             budget_min, budget_max = x_range
-#             revenue_min, revenue_max = y_range
+#     return fig
 
-#             # Because log axis, the values are in log scale, so convert back
-#             budget_min_val = 10 ** budget_min
-#             budget_max_val = 10 ** budget_max
-#             revenue_min_val = 10 ** revenue_min
-#             revenue_max_val = 10 ** revenue_max
+    
 
-#             dff_filtered = dff[
-#                 (dff["budget"] >= budget_min_val) & (dff["budget"] <= budget_max_val) &
-#                 (dff["revenue"] >= revenue_min_val) & (dff["revenue"] <= revenue_max_val)
-#             ]
-#         else:
-#             dff_filtered = dff
+# # Handle clicks on the sunburst to show movies in the selected genre
+# @app.callback(
+#     Output("movie-list-items", "children"),
+#     [Input("genre-sunburst", "clickData"),
+#     Input("genre-year-slider", "value")]
+# )
+# def update_movie_list(click_data, year_range):
+#     if click_data is None:
+#         return []
+
+#     dff = df[(df["release_year"] >= year_range[0]) & (df["release_year"] <= year_range[1])]
+    
+#     # Get the full ID clicked (e.g., 'Horror-Thriller' or just 'Horror')
+#     clicked_id = click_data['points'][0].get('id', '')
+    
+#     # Split the clicked id to get hierarchy path
+#     genres_selected = clicked_id.split('-') 
+    
+#     if not genres_selected:
+#         return []
+
+
+#     primary_genre = genres_selected[0]
+#     if len(primary_genre.split('/')) == 1:
+#         sub_genres = primary_genre
 #     else:
-#         dff_filtered = dff
-#     # table_data = dff.sort_values("revenue", ascending=False).head(500)[[
-#     #     "title_y", "release_year", "budget", "revenue", "profit", "roi", "vote_average"
-#     # ]].to_dict("records")
-#     top_movies = dff.sort_values(sort_by, ascending=False).head(15)
-#     movie_list = [
+#         sub_genres = primary_genre.split('/')
+#         sub_genres = sub_genres[0]+'-'+sub_genres[1]
+
+#     # Filter rows where genres match the full path (order matters!)
+#     def genre_match(row):
+#         if pd.isna(row['genres_y']):
+#             return False
+#         return sub_genres in row['genres_y']
+
+#     filtered_movies = dff[dff.apply(genre_match, axis=1)]
+#     filtered_movies = filtered_movies.sort_values('revenue', ascending=False).head(15)
+
+#     return [
 #         html.Li([
-#             html.Strong(movie["title_y"]),
+#             html.Strong(movie['title_y']),
 #             html.Br(),
-#             f"Year: {movie['release_year']} | Revenue: ${movie['revenue']:,.0f} | ROI: {movie['roi']:.1f}% | Rating: {movie['vote_average']:.1f}"
-#         ]) for _, movie in top_movies.iterrows()
+#             f"Year: {movie['release_year']} | Revenue: ${movie['revenue']:,.0f} | ROI: {movie['roi']:.1f}%"
+#         ]) for _, movie in filtered_movies.iterrows()
 #     ]
-#     return fig, movie_list
 
-# TSNE tab
-@app.callback(
-    Output("tsne-plot", "figure"),
-    [Input("tsne-year-slider", "value"),
-     Input("cluster-count-store", "data")]
-)
-def update_tsne(year_range, n_clusters):
-    if tsne_data is None:
-        # Return empty figure with error message
-        fig = px.scatter(title="TSNE data not available. Please run precompute_tsne.py first.")
-        return fig
-    
-    # Get precomputed dataframe
-    dff = tsne_data['dataframe'].copy()
-    
-    # Filter by year range
-    dff = dff[(dff["release_year"] >= year_range[0]) & (dff["release_year"] <= year_range[1])]
-    
-    if dff.empty:
-        fig = px.scatter(title="No data available for selected year range")
-        return fig
-    
-    # Get precomputed cluster labels for the requested k
-    if n_clusters in tsne_data['clusters']:
-        # Map cluster labels back to the filtered dataframe
-        # We need to align the cluster labels with the filtered data
-        all_clusters = tsne_data['clusters'][n_clusters]
-        original_df = tsne_data['dataframe']
-        
-        # Create a mapping from index to cluster label
-        cluster_mapping = dict(zip(original_df.index, all_clusters))
-        
-        # Apply cluster labels to filtered dataframe
-        dff["cluster"] = dff.index.map(cluster_mapping).astype(str)
-    else:
-        # Fallback: compute clusters on the fly (shouldn't happen often)
-        dff["cluster"] = "0"
-    
-    # Create the plot using precomputed TSNE coordinates
-    fig = px.scatter(
-        dff,
-        x="tsne_dim1",  # Use precomputed coordinates
-        y="tsne_dim2",  # Use precomputed coordinates
-        color="cluster",
-        hover_name="title_y",
-        title=f"TSNE Projection of Movies (k={n_clusters})",
-        labels={
-            "tsne_dim1": "TSNE Dimension 1",
-            "tsne_dim2": "TSNE Dimension 2"
-        }
-    )
-    fig.update_layout(hovermode="closest")
-    return fig
 
-# Genre Exploration tab
 @app.callback(
-    [Output("genre-sunburst", "figure"),
-     Output("genre-movie-list", "children")],
-    [Input("genre-year-slider", "value"),
-     Input("genre-color-by", "value")]
+    Output("genre-icicle", "figure"),
+    [
+        Input("shared-year-slider", "value"),
+        Input("color-by", "value"),
+        Input("current-filter", "data")
+    ],
+    [State("genre-icicle", "relayoutData")]
 )
-def update_genre_sunburst(year_range, color_by):
+def update_icicle(year_range, color_by, current_filter, relayout_data):
+    # Check if this update was triggered by a genre click
+    ctx = callback_context
+    if ctx.triggered and ctx.triggered[0]["prop_id"] == "current-filter.data":
+        # If the current filter change was due to a genre click, don't update the icicle
+        if current_filter and current_filter.get("genres"):
+            # Return dash.no_update to prevent the icicle from refreshing
+            return dash.no_update
+    
+    # Rest of your existing code stays the same...
     dff = df[(df["release_year"] >= year_range[0]) & (df["release_year"] <= year_range[1])]
-    
-    # Create genre hierarchy data for the selected years
+
+    if current_filter:
+        if current_filter.get("zoom_ids"):
+            dff = dff[dff["title_y"].isin(current_filter["zoom_ids"])]
+        elif current_filter.get("scatter_ids"):
+            dff = dff[dff["title_y"].isin(current_filter["scatter_ids"])]
+            
     genre_hierarchy = []
+
+        # First collect all primary genres (unique)
+    primary_genres = set()
     for _, row in dff.iterrows():
+        if pd.isna(row['genres_y']):
+            continue
+        genres = row['genres_y'].split('-')
+        if genres:
+            primary_genres.add(genres[0])
+
+
+    for _, row in dff.iterrows():
+        if pd.isna(row['genres_y']):
+            continue
         genres = row['genres_y'].split('-')
         if len(genres) > 1:
             primary = genres[0]
@@ -981,70 +973,104 @@ def update_genre_sunburst(year_range, color_by):
                     'ids': f"{primary}-{sub}",
                     'labels': sub,
                     'parents': primary,
-                    'title': row['title_y'],
+                    'value': 1,  # or some meaningful metric, or fixed small value
                     'budget': row['budget'],
                     'revenue': row['revenue'],
                     'profit': row['profit'],
                     'roi': row['roi'],
+                    'runtime': row['runtime'],
                     'vote_average': row['vote_average']
                 })
-    
-    hierarchy_df = pd.DataFrame(genre_hierarchy)
-    
-    # Aggregate data for the sunburst
+
+    if not genre_hierarchy:
+        return px.icicle(title="No genre data available.")
+
+    df_hier = pd.DataFrame(genre_hierarchy)
     if color_by == 'count':
-        agg_df = hierarchy_df.groupby(['ids', 'labels', 'parents']).size().reset_index(name='count')
-        color_col = 'count'
-        values = agg_df['count']
+        agg_df = df_hier.groupby(['ids', 'labels', 'parents']).size().reset_index(name='value')
+        color_col = 'value'
     else:
-        agg_df = hierarchy_df.groupby(['ids', 'labels', 'parents']).agg({
+        agg_df = df_hier.groupby(['ids', 'labels', 'parents']).agg({
             'roi': 'mean',
-            'profit': 'mean',
-            'vote_average': 'mean'
+            'profit': 'mean', 
+            'vote_average': 'mean',
+            'runtime': 'mean'
         }).reset_index()
+
+        color_col = color_by
+
         if color_by in ['roi', 'vote_average']:
             lower = agg_df[color_by].quantile(0.01)
             upper = agg_df[color_by].quantile(0.99)
-            agg_df['color_scaled'] = agg_df[color_by].clip(lower, upper)
-            color_col = 'color_scaled'
-        else:
-            color_col = color_by
+            agg_df[color_by] = agg_df[color_by].clip(lower, upper)
 
-        values = agg_df[color_by].abs()
+    # Step 1: Make a copy
+    normalized_df = agg_df.copy()
+
+    # Step 2: Extract the top-level genre from the 'ids' field
+    # Assuming the format is like: "Action-Adventure" or just "Action"
+    normalized_df['primary'] = normalized_df['ids'].apply(lambda x: x.split('-')[0])
+
+    # Step 3: Compute total value per primary genre
+    # total_values = normalized_df.groupby('primary')['value'].sum().to_dict()
+
+    # # Step 4: Create the new normalized column
+    # normalized_df['relative_value'] = normalized_df.apply(
+    #     lambda row: row['value'] / total_values[row['primary']] if row['primary'] in total_values and total_values[row['primary']] != 0 else 0,
+    #     axis=1
+    # )
+    subgenres_only = normalized_df[normalized_df['parents'] != '']
+
+
+    # Step 3: Keep only subgenres (i.e., ones with a parent)
+    subgenres_only = normalized_df[normalized_df['parents'] != '']
+
+    # Step 4: Count subgenres per primary
+    subgenre_counts = subgenres_only.groupby('primary').size().to_dict()
+    subgenres_only['relative_value'] = subgenres_only['primary'].apply(
+    lambda p: 1 / subgenre_counts[p] if subgenre_counts.get(p, 0) > 0 else 0
+)
+
+    subgenres_only['root'] = 'All Movies'
     
-    # Create sunburst chart
-    fig = px.sunburst(
-        agg_df,
-        path=['parents', 'labels'],
-        values='count' if color_by == 'count' else values,
+    fig = px.icicle(
+        subgenres_only,
+        path=['root','parents', 'labels'],
+        values='relative_value',
         color=color_col,
-        hover_data=['labels'],
-        title=f"Movie Genre Hierarchy ({year_range[0]}-{year_range[1]})",
-        branchvalues="total"
+        branchvalues='total',
     )
-    
+
+
     fig.update_layout(
         margin=dict(t=40, l=0, r=0, b=0),
-        hovermode="closest"
+        # Add these to control the breadcrumbs
+        showlegend=True,
+        # Force consistent breadcrumb display
+        annotations=[]  # This can help with consistency
     )
-    
-    # Create a simple list of movies for the selected genre when clicked
-    movie_list = html.Div([
-        html.H4("Click on a genre to see movies"),
-        html.Ul(id="movie-list-items")
-    ])
-    
-    return fig, movie_list
+#     fig.update_traces(
+#     pathbar_visible=True,  # Explicitly show/hide the path bar
+#     pathbar_thickness=20   # Control thickness
+# )
+    fig.update_layout(coloraxis_showscale=False)
 
-    
+    fig.update_layout(
+        plot_bgcolor='#ffffff',
+        paper_bgcolor='#f5f5f5',
+        font=dict(color='#333333', family='Sans-serif'),
 
-# Handle clicks on the sunburst to show movies in the selected genre
+
+    )
+    return fig
+
+
 @app.callback(
     Output("movie-list-items", "children"),
-    [Input("genre-sunburst", "clickData"),
-    Input("genre-year-slider", "value")]
+    [Input("genre-icicle", "clickData"),
+     Input("genre-year-slider", "value")]
 )
-def update_movie_list(click_data, year_range):
+def update_movies_from_icicle(click_data, year_range):
     if click_data is None:
         return []
 
@@ -1083,7 +1109,6 @@ def update_movie_list(click_data, year_range):
             f"Year: {movie['release_year']} | Revenue: ${movie['revenue']:,.0f} | ROI: {movie['roi']:.1f}%"
         ]) for _, movie in filtered_movies.iterrows()
     ]
-
 # ====== New Callbacks for Success Prediction ======
 @app.callback(
     [Output('success-output', 'children'),
@@ -1091,17 +1116,18 @@ def update_movie_list(click_data, year_range):
      Output('revenue-output', 'children'),
      Output('roi-output', 'children'),
      Output('recommendations', 'children'),
-     Output('sensitivity-plot', 'figure')],
+     Output('prediction-store', 'data')],  # Store prediction data
+    Output('sensitivity-plot', 'figure'),
     [Input('predict-button', 'n_clicks')],
     [State('budget-input', 'value'),
      State('runtime-input', 'value'),
      State('language-input', 'value'),
-     State('year-input', 'value'),
      State('genres-input', 'value')]
 )
-def update_predictions(n_clicks, budget, runtime, language, year, genres):
+def update_predictions(n_clicks, budget, runtime, language, genres):
+    year = 2025
     if n_clicks == 0:
-        return "", "", "", "", "", go.Figure()
+        return "", "", "", "", "", "", go.Figure()
     
     # Prepare input features
     input_data = pd.DataFrame({
@@ -1129,14 +1155,39 @@ def update_predictions(n_clicks, budget, runtime, language, year, genres):
     
     # Create sensitivity plot
     fig = create_sensitivity_plot(budget, runtime, language, year, genres)
-    
+    fig.update_layout(
+        title = None,
+        yaxis=dict(
+            showticklabels=False,
+            title=None
+        ),
+        yaxis2=dict(
+            showticklabels=False,
+            title=None
+        ),
+        yaxis3=dict(
+            showticklabels=False,
+            title=None
+        )
+    )
     # Format outputs
     success_output = f"🎬 Success Probability: {success_prob:.1%}"
     rating_output = f"⭐ Predicted Rating: {rating_pred:.1f}/10"
     revenue_output = f"💰 Predicted Revenue: ${revenue_pred/1000000:.1f} million"
     roi_output = f"📈 Predicted ROI: {roi:.1f}x"
+
+    # Store prediction data for scatter plot
+    prediction_data = {
+        'budget': budget * 1000000,
+        'revenue_pred': revenue_pred,
+        'profit_pred': revenue_pred- budget* 1000000,
+        'rating_pred': rating_pred,
+        'success_prob': success_prob,
+        'runtime_pred': runtime,
+        'roi_pred': roi
+    }
     
-    return success_output, rating_output, revenue_output, roi_output, recommendations, fig
+    return success_output, rating_output, revenue_output, roi_output, recommendations, prediction_data, fig
 
 def generate_recommendations(budget, runtime, language, year, genres, 
                            success_prob, rating_pred, roi):
@@ -1147,7 +1198,7 @@ def generate_recommendations(budget, runtime, language, year, genres,
     low_rating_threshold = y_rating_train.mean()
     low_roi_threshold = (np.expm1(y_revenue_train) / np.expm1(X_train['budget_log'])).mean()
 
-    # === 2. Genre-based improvement: test adding each genre individually ===
+    # === 2. Genre-based improvement: test.py adding each genre individually ===
     if rating_pred < low_rating_threshold:
         best_improvement = 0
         best_genre = None
@@ -1238,114 +1289,57 @@ def create_sensitivity_plot(budget, runtime, language, year, genres):
         x=budget_range, y=ratings,
         name='Predicted Rating',
         yaxis='y1',
-        line=dict(color='blue'))
-    )
+        line=dict(color='blue', width=3),
+        hovertemplate="Rating: %{y:.2f}<extra></extra>"
+    ))
     
     fig.add_trace(go.Scatter(
         x=budget_range, y=revenues,
         name='Predicted Revenue (million $)',
         yaxis='y2',
-        line=dict(color='green'))
-    )
+        line=dict(color='green', width=3),
+        hovertemplate="Revenue: %{y:.2f}M<extra></extra>"
+    ))
     
     fig.add_trace(go.Scatter(
         x=budget_range, y=success_probs,
         name='Success Probability (%)',
         yaxis='y3',
-        line=dict(color='red'))
+        line=dict(color='red', width=3),
+        hovertemplate="Success: %{y:.2f}%<extra></extra>"
+    ))
+    
+    # Apply the prettify function
+    fig = prettify_sensitivity_figure(
+        fig,
+        title='Sensitivity to Budget Changes'
     )
     
+    # Custom axis settings after prettify
     fig.update_layout(
-        title='Sensitivity to Budget Changes',
         xaxis_title='Budget (million $)',
         yaxis=dict(title='Rating (1-10)', color='blue'),
         yaxis2=dict(title='Revenue (million $)', color='green', overlaying='y', side='right'),
-        yaxis3=dict(title='Success Probability (%)', color='red', overlaying='y', side='left', position=0.15),
-        hovermode='x unified',
-        legend=dict(orientation='h', yanchor='bottom', y=1.02, xanchor='right', x=1)
+        yaxis3=dict(title='Success Probability (%)', color='red', overlaying='y', side='left')
     )
-    
-    return fig
-
-
-###CALLBACK FOR GRAPH OF TAGS###
-@app.callback(
-    Output('selected-tags-dropdown', 'options'),
-    Input('network-data-store', 'data')
-)
-def update_dropdown_options(network_data):
-    nodes = network_data.get('nodes', [])
-    options = [{'label': node['label'], 'value': node['id']} for node in nodes]
-    return options
-
-@app.callback(
-    Output('tag-network-graph', 'figure'),
-    Input('selected-tags-dropdown', 'value'),
-    Input('node-color-metric', 'value'),  
-    State('network-data-store', 'data')
-)
-def update_graph(selected_tags, color_metric, network_data):
-    if not selected_tags:
-        # Return empty figure with message
-        fig = go.Figure()
-        fig.update_layout(
-            title="Select tag(s) to start",
-            xaxis=dict(visible=False),
-            yaxis=dict(visible=False)
+    fig.update_layout(
+        plot_bgcolor='#f5f5f5',
+        paper_bgcolor='#f5f5f5',
+        font=dict(color='#333333', family='Sans-serif'),
+        legend=dict(
+            bgcolor='#f5f5f5',  # Set legend background color
+            bordercolor="#000000",  # Optional: border color
+            borderwidth=1,  # Optional: border width
+            font=dict(
+                color='#333333'  # Optional: change legend text color if needed
+            )
         )
-        return fig
-    
-    # Filter dataframe to movies containing all selected tags
-    selected_tags_set = set(selected_tags)
-    
-    # df['filtered_tags'] is a list of tags per movie (preprocessed)
-    filtered_df = df[df['filtered_tags'].apply(lambda tags: selected_tags_set.issubset(set(tags)))]
-
-    if filtered_df.empty:
-        # No movies with all selected tags, return empty graph
-        fig = go.Figure()
-        fig.update_layout(title="No movies found with all selected tags.")
-        return fig
-
-    # Get all tags in filtered movies (flatten)
-    all_tags_in_filtered = filtered_df['filtered_tags'].explode().value_counts()
-
-    # Build nodes only for these tags
-    nodes = []
-    for tag, freq in all_tags_in_filtered.items():
-        tag_movies = filtered_df[filtered_df['filtered_tags'].apply(lambda tags: tag in tags)]
-        nodes.append({
-            'id': tag,
-            'label': tag,
-            'frequency': freq,
-            'avg_roi': tag_movies['roi'].mean(),
-            'avg_profit': tag_movies['profit'].mean(),
-            'avg_rating': tag_movies['vote_average'].mean()
-        })
-
-    # Build co-occurrence in filtered_df (same as before but only for filtered movies)
-    from collections import Counter
-    cooc_counter = Counter()
-    for tags in filtered_df['filtered_tags']:
-        unique_tags = list(set(tags))
-        for i in range(len(unique_tags)):
-            for j in range(i + 1, len(unique_tags)):
-                pair = tuple(sorted([unique_tags[i], unique_tags[j]]))
-                cooc_counter[pair] += 1
-
-    links = [{'source': src, 'target': tgt, 'value': count} for (src, tgt), count in cooc_counter.items()]
-
-    # Build graph
-    G = nx.Graph()
-    for node in nodes:
-        G.add_node(node['id'], **node)
-    for link in links:
-        G.add_edge(link['source'], link['target'], weight=link['value'])
-
-
-    fig = create_network_figure(G, selected_tags, color_metric)
+    )
     return fig
+
+
+
 
 # Run app
-if __name__ == '__main__':
+if __name__ == "__main__":
     app.run(debug=True)

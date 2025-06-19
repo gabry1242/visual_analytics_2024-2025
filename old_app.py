@@ -1,39 +1,106 @@
+# === Imports ===
 import dash
-from dash import dcc, html, Input, Output, State, dash_table
+from dash import dcc, html, Input, Output, State, callback_context, dash_table
 import pandas as pd
-import plotly.express as px
 import numpy as np
+import plotly.express as px
+import plotly.graph_objects as go
 from sklearn.decomposition import PCA
-from sklearn.preprocessing import StandardScaler
+from sklearn.preprocessing import (StandardScaler, MinMaxScaler,
+                                   MultiLabelBinarizer, OneHotEncoder)
 from sklearn.cluster import KMeans
 from sklearn.ensemble import RandomForestRegressor, RandomForestClassifier
 from sklearn.model_selection import train_test_split
 from sklearn.pipeline import Pipeline
 from sklearn.compose import ColumnTransformer
-from sklearn.preprocessing import OneHotEncoder
-import joblib
 from sklearn.metrics import mean_squared_error, accuracy_score
-from sklearn.preprocessing import MultiLabelBinarizer
-import plotly.graph_objects as go
-from itertools import combinations
+import joblib
 import networkx as nx
 import seaborn as sns
 from collections import Counter
-from dash import callback_context
-from sklearn.preprocessing import MinMaxScaler
+from itertools import combinations
 
-# Load and prepare data
+# === Load and Clean Data ===
 df = pd.read_csv("merged_with_tags.csv")
 df = df.dropna(subset=["budget", "revenue", "release_year", "title_y", "vote_count", 'genres_y'])
 df = df.drop_duplicates(subset=['title_y'])
 df["release_year"] = df["release_year"].astype(int)
-# Extra metrics
+
+# === Feature Engineering ===
 df["profit"] = df["revenue"] - df["budget"]
 df["profit_margin"] = (df["profit"] / df["budget"]).replace([np.inf, -np.inf], np.nan)
 df["roi"] = df["profit_margin"] * 100
 df["primary_genre"] = df["genres_y"].str.split("-").str[0]
 
-#helper better graph
+# === Tag Preprocessing ===
+df['tag_list'] = df['tag'].fillna('').str.lower().str.split(';').apply(lambda tags: [t.strip() for t in tags if t.strip()])
+all_tags = df['tag'].dropna().str.split(';').explode().str.strip().str.lower()
+tag_counts = all_tags.value_counts()
+popular_tags = tag_counts[tag_counts > 300]
+
+# === Genre Hierarchy Function ===
+def prepare_genre_data(df):
+    """Splits genre into primary and subgenres for hierarchy analysis."""
+    genre_df = df.assign(genres=df['genres_y'].str.split('|')).explode('genres')
+    genre_counts = genre_df.groupby('genres').size().reset_index(name='count')
+    genre_hierarchy = []
+    for _, row in genre_df.iterrows():
+        genres = row['genres_y'].split('-')
+        if len(genres) > 1:
+            primary = genres[0]
+            for sub in genres[1:]:
+                genre_hierarchy.append({
+                    'primary': primary,
+                    'sub': sub,
+                    'title': row['title_y'],
+                    'budget': row['budget'],
+                    'revenue': row['revenue'],
+                    'profit': row['profit'],
+                    'roi': row['roi'],
+                    'vote_average': row['vote_average']
+                })
+    hierarchy_df = pd.DataFrame(genre_hierarchy)
+    return genre_counts, hierarchy_df
+
+genre_counts, hierarchy_df = prepare_genre_data(df)
+
+# === Modeling Prep ===
+df['genres_list'] = df['genres_y'].str.split('-')
+mlb = MultiLabelBinarizer()
+genre_encoded = pd.DataFrame(mlb.fit_transform(df['genres_list']), columns=mlb.classes_, index=df.index)
+
+df['success'] = (df['vote_average'] > 6.5) & (df['revenue'] > df['budget'] * 2)
+df['budget_log'] = np.log1p(df['budget'])
+df['revenue_log'] = np.log1p(df['revenue'])
+df['is_english'] = (df['original_language'] == 'en').astype(int)
+
+features = pd.concat([
+    df[['budget_log', 'runtime', 'is_english', 'release_year']],
+    genre_encoded
+], axis=1)
+
+success_target = df['success']
+rating_target = df['vote_average']
+revenue_target = df['revenue_log']
+
+X_train, X_test, y_success_train, y_success_test, y_rating_train, y_rating_test, y_revenue_train, y_revenue_test = train_test_split(
+    features, success_target, rating_target, revenue_target, test_size=0.2, random_state=42
+)
+
+# === Train Models ===
+success_model = RandomForestClassifier(n_estimators=100, random_state=42)
+success_model.fit(X_train, y_success_train)
+
+rating_model = RandomForestRegressor(n_estimators=100, random_state=42)
+rating_model.fit(X_train, y_rating_train)
+
+revenue_model = RandomForestRegressor(n_estimators=100, random_state=42)
+revenue_model.fit(X_train, y_revenue_train)
+
+all_genres = sorted(list(set([genre for sublist in df['genres_list'].dropna() for genre in sublist])))
+
+
+# === Helper Function to Make Scatterplot Cleaner ===
 def prettify_figure(fig, x_axis=None, y_axis=None, title=None):
     fig.update_layout(
         font=dict(family='Sans-serif', size=14),
@@ -72,12 +139,13 @@ def prettify_figure(fig, x_axis=None, y_axis=None, title=None):
     return fig
 
 
+# === Helper Function to Make Sensitivity Plot Cleaner ===
 def prettify_sensitivity_figure(fig, title=None):
     fig.update_layout(
         font=dict(family='Sans-serif', size=14),
         plot_bgcolor="white",
         paper_bgcolor="white",
-        margin=dict(l=80, r=80, t=80, b=60),  # More margin for multiple y-axes
+        margin=dict(l=80, r=80, t=80, b=60),  
         title=dict(
             text=f"<b>{title}</b>" if title else '',
             x=0.5,
@@ -110,7 +178,7 @@ def prettify_sensitivity_figure(fig, title=None):
             linecolor='blue'  # Match trace color
         ),
         yaxis2=dict(
-            showgrid=False,  # Avoid double grid lines
+            showgrid=False,  
             zeroline=False,
             mirror=True,
             showline=True,
@@ -125,7 +193,6 @@ def prettify_sensitivity_figure(fig, title=None):
         )
     )
 
-    # Update traces for consistent styling
     fig.update_traces(
         line=dict(width=3),
         marker=dict(size=8),
@@ -140,113 +207,22 @@ def prettify_sensitivity_figure(fig, title=None):
 
 
 
-#tags preparation
-all_tags = df['tag'].dropna().str.split(';').explode().str.strip().str.lower()
-# Count the occurrences of each tag
-tag_counts = all_tags.value_counts()
-df['tag_list'] = df['tag'].fillna('').str.lower().str.split(';').apply(lambda tags: [t.strip() for t in tags if t.strip()])
-# Filter tags that appear more than 5 times
-popular_tags = tag_counts[tag_counts > 300]
-# Get co-occurrences of popular tags in the same movie
-# Prepare genre hierarchy data
-def prepare_genre_data(df):
-    # Split genres and explode into multiple rows
-    genre_df = df.assign(genres=df['genres_y'].str.split('|')).explode('genres')
-    
-    # Create a count of movies per genre
-    genre_counts = genre_df.groupby('genres').size().reset_index(name='count')
-    
-    # For simplicity, we'll create a two-level hierarchy (primary genre -> sub-genre)
-    # In a real app, you might want a more sophisticated hierarchy
-    genre_hierarchy = []
-    
-    for _, row in genre_df.iterrows():
-        genres = row['genres_y'].split('-')
-        if len(genres) > 1:
-            primary = genres[0]
-            for sub in genres[1:]:
-                genre_hierarchy.append({
-                    'primary': primary,
-                    'sub': sub,
-                    'title': row['title_y'],
-                    'budget': row['budget'],
-                    'revenue': row['revenue'],
-                    'profit': row['profit'],
-                    'roi': row['roi'],
-                    'vote_average': row['vote_average']
-                })
-    
-    hierarchy_df = pd.DataFrame(genre_hierarchy)
-    
-    return genre_counts, hierarchy_df
-
-genre_counts, hierarchy_df = prepare_genre_data(df)
-
-# Define features used for clustering
-numeric_features = ["budget", "revenue", "vote_average", "vote_count", "runtime", "profit", "roi"]
 
 
 
 
-# ====== Success Prediction Models ======
-# Prepare data for success prediction
-df['genres_list'] = df['genres_y'].str.split('-')
-mlb = MultiLabelBinarizer()
-genre_encoded = pd.DataFrame(mlb.fit_transform(df['genres_list']), 
-                           columns=mlb.classes_, 
-                           index=df.index)
-
-# Calculate success metric
-df['success'] = (df['vote_average'] > 6.5) & (df['revenue'] > df['budget'] * 2)
-df['budget_log'] = np.log1p(df['budget'])
-df['revenue_log'] = np.log1p(df['revenue'])
-df['is_english'] = (df['original_language'] == 'en').astype(int)
-
-# Prepare features and targets
-features = pd.concat([
-    df[['budget_log', 'runtime', 'is_english', 'release_year']],
-    genre_encoded
-], axis=1)
-
-success_target = df['success']
-rating_target = df['vote_average']
-revenue_target = df['revenue_log']
-
-# Split data
-X_train, X_test, y_success_train, y_success_test, y_rating_train, y_rating_test, y_revenue_train, y_revenue_test = train_test_split(
-    features, success_target, rating_target, revenue_target, test_size=0.2, random_state=42
-)
-
-# Build models
-success_model = RandomForestClassifier(n_estimators=100, random_state=42)
-success_model.fit(X_train, y_success_train)
-
-rating_model = RandomForestRegressor(n_estimators=100, random_state=42)
-rating_model.fit(X_train, y_rating_train)
-
-revenue_model = RandomForestRegressor(n_estimators=100, random_state=42)
-revenue_model.fit(X_train, y_revenue_train)
-
-# Get all unique genres from the data
-all_genres = sorted(list(set([genre for sublist in df['genres_list'].dropna() for genre in sublist])))
-
-
-
-
-# Dash app setup
+# === Dash App Setup ===
 app = dash.Dash(__name__, suppress_callback_exceptions=True)
-
-# network_data = preprocess_tag_network(df)
-
 app.title = "Movie Success Studio"
 
+# === Layout Placeholder ===
 app.layout = html.Div([ 
     dcc.Store(id="current-filter", data={"genres": None, "scatter_ids": None, "zoom_ids": None}),
     dcc.Store(id="prediction-store", data=None),
 
     # ==== TOP SECTION ====
     html.Div([
-        # LEFT (20%)
+        # LEFT COLUMN (20%)
         html.Div([
             html.Label("Color by:"),
             dcc.Dropdown(
@@ -270,11 +246,11 @@ app.layout = html.Div([
             dcc.Graph(id="genre-icicle", style={"height": "40vh", "width": "100%"})
         ], style={"width": "20%", "padding": "10px", "display": "inline-block", "verticalAlign": "top"}),
 
-    # RIGHT (80%)
+    # RIGHT COLUMN (80%)
     html.Div([
-        # Scatterplot controls with labels above
+        # Scatterplot Dropdowns
         html.Div([
-            # Color by dropdown with label above
+            # Color by Dropdown
             html.Div([
                 html.Label("Color by:", style={"margin-bottom": "5px"}),
                 dcc.Dropdown(
@@ -291,7 +267,7 @@ app.layout = html.Div([
                 )
             ], style={"display": "inline-block", "marginRight": "20px"}),
             
-            # X-axis dropdown with label above
+            # X-axis dropdown
             html.Div([
                 html.Label("X-axis:", style={"margin-bottom": "5px"}),
                 dcc.Dropdown(
@@ -309,7 +285,7 @@ app.layout = html.Div([
                 )
             ], style={"display": "inline-block", "marginRight": "20px"}),
             
-            # Y-axis dropdown with label above
+            # Y-axis dropdown
             html.Div([
                 html.Label("Y-axis:", style={"margin-bottom": "5px"}),
                 dcc.Dropdown(
@@ -334,11 +310,11 @@ app.layout = html.Div([
 
     # ==== BOTTOM SECTION ====
     html.Div([
-        # LEFT SIDE (40%)
+        # LEFT COLUMN (40%)
         html.Div([
             html.H3("Movie Success Predictor"),
             html.Div([
-                # Inputs (50% width)
+                # Inputs (50% width of left column)
                 html.Div([
                     html.Label("Budget (in millions)"),
                     dcc.Input(id='budget-input', type='number', value=50, min=0.1, step=0.01,
@@ -370,7 +346,7 @@ app.layout = html.Div([
                                        'width': '100%', 'padding': '10px'})
                 ], style={"width": "35%", "paddingRight": "10px"}),
 
-# Outputs (50% width)
+# Outputs (50% width of left column)
 html.Div([
     # First row container
     html.Div([
