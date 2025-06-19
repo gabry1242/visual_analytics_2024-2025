@@ -54,7 +54,7 @@ The app uses Dash and Plotly for:
 ---
 
 ## 📁 Project Structure
-- `merged_with_tags.csv` → Main input dataset 
+- `dataset.csv` → Main input dataset 
 - `app.py` → Main Dash application code
 - `README.md` → Project overview and documentation
 - `requirements.txt` → Python dependencies 
